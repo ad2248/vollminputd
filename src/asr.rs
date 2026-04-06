@@ -2,10 +2,14 @@ use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io::Read;
 use std::time::Duration;
-use tokio_tungstenite::{connect_async, tungstenite::http::Request, tungstenite::Message};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::http::Request,
+    tungstenite::Message,
+    WebSocketStream,
+};
+use tokio::net::TcpStream;
 use url::Url;
 
 /// DashScope ASR 配置
@@ -94,14 +98,42 @@ pub struct AsrClient {
     config: AsrConfig,
 }
 
+/// ASR 识别会话
+pub struct RecognitionSession {
+    write: futures_util::stream::SplitSink<WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>, Message>,
+    read: futures_util::stream::SplitStream<WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>>,
+    event_counter: u64,
+}
+
 impl AsrClient {
     /// 创建新的 ASR 客户端
     pub fn new(config: AsrConfig) -> Self {
         Self { config }
     }
 
-    /// 从音频文件识别语音
-    pub async fn recognize_file(&self, audio_path: &str) -> Result<String> {
+    /// 启动一个识别会话
+    ///
+    /// # 示例
+    /// ```no_run
+    /// use crate::asr::{AsrClient, AsrConfig};
+    ///
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let config = AsrConfig::default();
+    /// let client = AsrClient::new(config);
+    ///
+    /// // 启动会话
+    /// let mut session = client.start_recognition().await?;
+    ///
+    /// // 发送音频片段
+    /// let audio_chunk = vec![0u8; 3200];
+    /// session.send_audio_chunk(&audio_chunk).await?;
+    ///
+    /// // 完成并获取结果
+    /// let result = session.finish_and_wait_result().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn start_recognition(&self) -> Result<RecognitionSession> {
         let url_str = format!("{}?model={}", self.config.base_url, self.config.model);
         let url = Url::parse(&url_str)?;
 
@@ -120,9 +152,24 @@ impl AsrClient {
             .body(())?;
 
         let (ws_stream, _) = connect_async(request).await?;
-        let (mut write, mut read) = ws_stream.split();
+        let (write, read) = ws_stream.split();
+
+        let mut session = RecognitionSession {
+            write,
+            read,
+            event_counter: 0,
+        };
 
         // 发送会话配置
+        session.init_session().await?;
+
+        Ok(session)
+    }
+}
+
+impl RecognitionSession {
+    /// 初始化会话配置
+    async fn init_session(&mut self) -> Result<()> {
         let session_config = SessionConfig {
             modalities: vec!["text".to_string()],
             input_audio_format: "pcm".to_string(),
@@ -144,38 +191,37 @@ impl AsrClient {
         };
 
         let event_json = serde_json::to_string(&session_event)?;
-        write.send(Message::Text(event_json.into())).await?;
+        self.write.send(Message::Text(event_json.into())).await?;
         println!("喵！会话配置已发送~ 🐾");
 
-        // 读取并发送音频数据
-        let mut audio_file = File::open(audio_path)?;
-        let mut buffer = vec![0u8; 3200]; // 每次读取 3200 字节
-        let mut event_counter = 0u64;
+        Ok(())
+    }
 
-        loop {
-            let n = audio_file.read(&mut buffer)?;
-            if n == 0 {
-                println!("喵！音频文件读取完毕~");
-                break;
-            }
-
-            let audio_data = &buffer[..n];
-            let encoded = BASE64.encode(audio_data);
-
-            let audio_event = AudioAppendEvent {
-                event_id: format!("event_{}", event_counter),
-                event_type: "input_audio_buffer.append".to_string(),
-                audio: encoded,
-            };
-
-            let event_json = serde_json::to_string(&audio_event)?;
-            write.send(Message::Text(event_json.into())).await?;
-
-            event_counter += 1;
-
-            // 模拟实时音频采集，发送间隔 100ms
-            tokio::time::sleep(Duration::from_millis(100)).await;
+    /// 发送音频数据片段
+    pub async fn send_audio_chunk(&mut self, chunk: &[u8]) -> Result<()> {
+        if chunk.is_empty() {
+            return Ok(());
         }
+
+        let encoded = BASE64.encode(chunk);
+
+        let audio_event = AudioAppendEvent {
+            event_id: format!("event_{}", self.event_counter),
+            event_type: "input_audio_buffer.append".to_string(),
+            audio: encoded,
+        };
+
+        let event_json = serde_json::to_string(&audio_event)?;
+        self.write.send(Message::Text(event_json.into())).await?;
+
+        self.event_counter += 1;
+
+        Ok(())
+    }
+
+    /// 完成音频发送并等待识别结果
+    pub async fn finish_and_wait_result(mut self) -> Result<String> {
+        println!("喵！音频数据流发送完毕~");
 
         // 等待识别结果
         let mut result_text = String::new();
@@ -188,7 +234,7 @@ impl AsrClient {
                     println!("喵！等待识别结果超时...");
                     break;
                 }
-                msg = read.next() => {
+                msg = self.read.next() => {
                     match msg {
                         Some(Ok(Message::Text(text))) => {
                             if let Ok(server_event) = serde_json::from_str::<ServerEvent>(&text) {
@@ -233,10 +279,11 @@ impl AsrClient {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use std::io::Read;
 
     #[tokio::test]
-    async fn test_asr_recognition() {
-        println!("🐾 喵！开始 ASR 单元测试~");
+    async fn test_asr_stream_recognition() {
+        println!("🐾 喵！开始 ASR 流式识别单元测试~");
 
         // 1. 加载配置
         let config = Config::from_yaml("conf.yaml")
@@ -250,19 +297,48 @@ mod tests {
 
         let client = AsrClient::new(asr_config);
 
-        // 3. 识别音频文件
+        // 3. 读取音频文件到内存
         let audio_path = "/home/kals/下载/zh_prompt.wav";
-        let result = client.recognize_file(audio_path).await;
+        let mut audio_file = std::fs::File::open(audio_path)
+            .expect("喵！无法打开音频文件 (⊙x⊙;)");
+        let mut audio_buffer = Vec::new();
+        audio_file.read_to_end(&mut audio_buffer)
+            .expect("喵！无法读取音频文件 (⊙x⊙;)");
 
-        // 4. 验证结果
-        assert!(result.is_ok(), "喵！ASR 识别失败了呜呜呜...");
+        println!("🐾 喵！音频文件大小：{} 字节", audio_buffer.len());
 
-        let text = result.unwrap();
-        println!("🐾 喵！识别结果：{}", text);
+        // 4. 模拟实时音频采集：将音频数据分成小块，每次发送 3200 字节（约 200ms）
+        let chunk_size = 3200; // 16kHz 采样率，16bit，单声道，200ms = 3200 字节
+        let audio_chunks: Vec<Vec<u8>> = audio_buffer
+            .chunks(chunk_size)
+            .map(|chunk| chunk.to_vec())
+            .collect();
 
-        // 验证识别到了中文文本
-        assert!(!text.is_empty(), "喵！识别结果为空...");
-        assert!(text.contains("对") || text.contains("账单") || text.contains("处理"),
+        println!("🐾 喵！音频数据分成 {} 块，准备发送~", audio_chunks.len());
+
+        // 5. 流式识别 - 启动会话
+        let mut session = client.start_recognition().await
+            .expect("喵！无法启动识别会话 (⊙x⊙;)");
+
+        // 6. 逐个发送音频片段
+        for (i, chunk) in audio_chunks.iter().enumerate() {
+            session.send_audio_chunk(chunk).await
+                .expect("喵！发送音频片段失败 (⊙x⊙;)");
+            println!("🐾 喵！已发送第 {} 个片段", i + 1);
+
+            // 模拟实时音频采集，发送间隔 100ms
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        // 7. 完成并获取识别结果
+        let result = session.finish_and_wait_result().await
+            .expect("喵！获取识别结果失败 (⊙x⊙;)");
+
+        println!("🐾 喵！识别结果：{}", result);
+
+        // 8. 验证结果
+        assert!(!result.is_empty(), "喵！识别结果为空...");
+        assert!(result.contains("对") || result.contains("账单") || result.contains("处理"),
                 "喵！识别结果不符合预期，应该包含相关词汇");
 
         println!("🐾 喵！测试通过啦！ (=・ω・=)");
