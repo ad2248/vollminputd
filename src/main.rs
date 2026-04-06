@@ -1,3 +1,6 @@
+mod config;
+mod asr;
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
