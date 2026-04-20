@@ -12,6 +12,12 @@ use tokio_tungstenite::{
 use tokio::net::TcpStream;
 use url::Url;
 
+#[mockall::automock]
+#[async_trait::async_trait]
+pub trait AsrEngine: Send + Sync {
+    async fn recognize(&self, audio_data: &[u8]) -> anyhow::Result<String>;
+}
+
 /// DashScope ASR 配置
 pub struct AsrConfig {
     pub api_key: String,
@@ -94,7 +100,7 @@ struct Transcript {
 }
 
 /// ASR 客户端
-pub struct AsrClient {
+pub struct DashScopeAsrEngine {
     config: AsrConfig,
 }
 
@@ -105,7 +111,24 @@ pub struct RecognitionSession {
     event_counter: u64,
 }
 
-impl AsrClient {
+#[async_trait::async_trait]
+impl AsrEngine for DashScopeAsrEngine {
+    async fn recognize(&self, audio_data: &[u8]) -> anyhow::Result<String> {
+        let mut session = self.start_recognition().await?;
+        
+        // Send audio in chunks (3200 bytes ≈ 200ms at 16kHz 16bit mono)
+        let chunk_size = 3200;
+        for chunk in audio_data.chunks(chunk_size) {
+            session.send_audio_chunk(chunk).await?;
+            // Small delay to simulate streaming
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+        
+        session.finish_and_wait_result().await
+    }
+}
+
+impl DashScopeAsrEngine {
     /// 创建新的 ASR 客户端
     pub fn new(config: AsrConfig) -> Self {
         Self { config }
@@ -115,14 +138,14 @@ impl AsrClient {
     ///
     /// # 示例
     /// ```no_run
-    /// use crate::asr::{AsrClient, AsrConfig};
+    /// use VoiceInput::asr::{DashScopeAsrEngine, AsrConfig, RecognitionSession};
     ///
     /// # async fn example() -> anyhow::Result<()> {
     /// let config = AsrConfig::default();
-    /// let client = AsrClient::new(config);
+    /// let client = DashScopeAsrEngine::new(config);
     ///
     /// // 启动会话
-    /// let mut session = client.start_recognition().await?;
+    /// let mut session: RecognitionSession = client.start_recognition().await?;
     ///
     /// // 发送音频片段
     /// let audio_chunk = vec![0u8; 3200];
@@ -282,6 +305,7 @@ mod tests {
     use std::io::Read;
 
     #[tokio::test]
+    #[ignore = "Requires real API key and audio file"]
     async fn test_asr_stream_recognition() {
         println!("🐾 喵！开始 ASR 流式识别单元测试~");
 
@@ -295,7 +319,7 @@ mod tests {
             ..Default::default()
         };
 
-        let client = AsrClient::new(asr_config);
+        let client = DashScopeAsrEngine::new(asr_config);
 
         // 3. 读取音频文件到内存
         let audio_path = "/home/kals/下载/zh_prompt.wav";

@@ -1,0 +1,133 @@
+export component VoiceInputApp inherits Window {
+    title: "语音输入";
+    width: 400px;
+    height: 180px;
+    no-frame: true;
+    always-on-top: true;
+    background: #2d2d2d;
+
+    // Properties exposed to Rust backend
+    in-out property <string> current-state: "idle";
+    in-out property <string> result-text: "";
+    in-out property <string> error-message: "";
+    in-out property <int> recording-seconds: 0;
+
+    // Callbacks to Rust backend
+    callback start-recording();
+    callback finish-recording();
+    callback cancel();
+    callback retry();
+    callback accept-result();
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+
+        // Header with icon and status
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: "🎙 语音输入";
+                color: #ffffff;
+                font-size: 18px;
+                font-weight: 600;
+            }
+            Rectangle { }
+            Text {
+                text: current-state == "idle" ? "就绪" :
+                      current-state == "recording" ? "聆听中..." :
+                      current-state == "transcribing" ? "解析中..." :
+                      current-state == "result" ? "识别完成" :
+                      current-state == "error" ? "出错" : "";
+                color: current-state == "error" ? #ff6b6b : #4ecdc4;
+                font-size: 14px;
+            }
+        }
+
+        // Main content area
+        Rectangle {
+            height: 60px;
+            background: #3d3d3d;
+            border-radius: 8px;
+
+            if current-state == "idle": Text {
+                text: "按下快捷键开始录音";
+                color: #aaaaaa;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            if current-state == "recording": HorizontalLayout {
+                alignment: center;
+                spacing: 12px;
+                Rectangle {
+                    width: 12px;
+                    height: 12px;
+                    background: #ff6b6b;
+                    border-radius: 6px;
+                    // Pulse animation would go here
+                }
+                Text {
+                    text: "正在聆听... " + recording-seconds + "s";
+                    color: #ffffff;
+                }
+            }
+
+            if current-state == "transcribing": HorizontalLayout {
+                alignment: center;
+                spacing: 8px;
+                Text {
+                    text: "解析中...";
+                    color: #ffffff;
+                }
+            }
+
+            if current-state == "result": Text {
+                text: result-text;
+                color: #ffffff;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            if current-state == "error": Text {
+                text: error-message;
+                color: #ff6b6b;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Keyboard shortcuts hint
+        Text {
+            text: current-state == "recording" ? "F = 完成  |  C/Esc = 取消" :
+                  current-state == "result" ? "Enter = 接受  |  C = 取消  |  R = 重试" :
+                  current-state == "error" ? "R = 重试  |  C = 取消" : "";
+            color: #888888;
+            font-size: 12px;
+            horizontal-alignment: center;
+        }
+    }
+
+    // Handle keyboard events
+    FocusScope {
+        key-pressed(event) => {
+            if event.text == "F" || event.text == "f" {
+                finish-recording();
+                accept
+            } else if event.text == "C" || event.text == "c" || event.text == "Escape" {
+                cancel();
+                accept
+            } else if event.text == "R" || event.text == "r" {
+                retry();
+                accept
+            } else if event.text == "Return" {
+                accept-result();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+}

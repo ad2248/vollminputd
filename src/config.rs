@@ -4,6 +4,27 @@ use std::fs;
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub DASHSCOPE_API_KEY: String,
+
+    #[serde(default = "default_max_recording_seconds")]
+    pub max_recording_seconds: u64,
+
+    #[serde(default = "default_audio_sample_rate")]
+    pub audio_sample_rate: u32,
+
+    #[serde(default = "default_audio_channels")]
+    pub audio_channels: u16,
+}
+
+fn default_max_recording_seconds() -> u64 {
+    60
+}
+
+fn default_audio_sample_rate() -> u32 {
+    16000
+}
+
+fn default_audio_channels() -> u16 {
+    1
 }
 
 impl Config {

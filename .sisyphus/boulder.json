@@ -1,0 +1,74 @@
+{
+  "active_plan": "/mnt/accelerated/Code/tools/VoiceInput/.sisyphus/plans/voice-input-gui.md",
+  "started_at": "2026-04-15T06:11:33.393Z",
+  "session_ids": [
+    "ses_270a01719ffe9wYfoA5MjwtTsa",
+    "ses_265592df6ffesFBXFLTAkerdWw",
+    "ses_265588743ffe6z27CiiCzbC4Rl",
+    "ses_26557e238ffesCFw95oO3Sd4af",
+    "ses_265528a54ffeSKw8UhabHJBGqU",
+    "ses_2655229edffewu460OlD1QOFnt",
+    "ses_26551a795ffe26ONf7ZgJPogMQ",
+    "ses_265514c54ffe48r2qdnq7TUIhy",
+    "ses_2652aee96ffeoiRzAP2bipT56I"
+  ],
+  "session_origins": {
+    "ses_270a01719ffe9wYfoA5MjwtTsa": "direct",
+    "ses_265592df6ffesFBXFLTAkerdWw": "appended",
+    "ses_265588743ffe6z27CiiCzbC4Rl": "appended",
+    "ses_26557e238ffesCFw95oO3Sd4af": "appended",
+    "ses_265528a54ffeSKw8UhabHJBGqU": "appended",
+    "ses_2655229edffewu460OlD1QOFnt": "appended",
+    "ses_26551a795ffe26ONf7ZgJPogMQ": "appended",
+    "ses_265514c54ffe48r2qdnq7TUIhy": "appended",
+    "ses_2652aee96ffeoiRzAP2bipT56I": "appended"
+  },
+  "plan_name": "voice-input-gui",
+  "agent": "atlas",
+  "task_sessions": {
+    "todo:1": {
+      "task_key": "todo:1",
+      "task_label": "1",
+      "task_title": "项目配置 + 依赖添加",
+      "session_id": "ses_2700d5d53ffeeI0S5mGQ4I4bfe",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-04-15T07:32:16.982Z"
+    },
+    "todo:2": {
+      "task_key": "todo:2",
+      "task_label": "2",
+      "task_title": "状态机类型定义 + TDD",
+      "session_id": "ses_26557e238ffesCFw95oO3Sd4af",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-04-17T08:59:38.940Z"
+    },
+    "todo:5": {
+      "task_key": "todo:5",
+      "task_label": "5",
+      "task_title": "音频采集模块 (audio.rs) + TDD",
+      "session_id": "ses_2655229edffewu460OlD1QOFnt",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-04-17T09:08:46.065Z"
+    },
+    "todo:9": {
+      "task_key": "todo:9",
+      "task_label": "9",
+      "task_title": "主事件循环重写 (main.rs)",
+      "session_id": "ses_26549175dffeqlTVll97siKlzg",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "updated_at": "2026-04-17T09:26:19.677Z"
+    },
+    "final-wave:f1": {
+      "task_key": "final-wave:f1",
+      "task_label": "F1",
+      "task_title": "**Plan Compliance Audit** — `oracle`",
+      "session_id": "ses_2652aee96ffeoiRzAP2bipT56I",
+      "agent": "oracle",
+      "updated_at": "2026-04-17T09:45:48.281Z"
+    }
+  }
+}
