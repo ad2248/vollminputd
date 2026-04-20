@@ -21,6 +21,7 @@ async-trait = "0.1"
 mockall = "0.13"
 
 [dev-dependencies]
+i-slint-backend-testing = { version = "=1.16.0", features = ["internal"] }
 
 [build-dependencies]
 slint-build = "1.12"

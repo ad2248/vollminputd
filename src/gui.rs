@@ -68,4 +68,8 @@ impl VoiceInputGui {
     pub fn on_accept_result(&self, callback: impl Fn() + 'static) {
         self.app.on_accept_result(callback);
     }
+
+    pub fn app(&self) -> &VoiceInputApp {
+        &self.app
+    }
 }
