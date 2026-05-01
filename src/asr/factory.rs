@@ -15,7 +15,7 @@ pub fn create_asr_engine(config: &Config) -> Box<dyn AsrEngine> {
             }))
         }
         AsrStrategy::OmniPlus => {
-            println!("[INFO] 使用 ASR 策略：OmniPlus（润色模式）");
+            println!("[INFO] 使用 ASR 策略：OmniPlus（直接识别）");
             Box::new(OmniPlusAsrEngine::new(OmniPlusConfig {
                 api_key: config.DASHSCOPE_API_KEY.clone(),
                 ..Default::default()
