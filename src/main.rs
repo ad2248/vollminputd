@@ -1,7 +1,7 @@
 use VoiceInput::app::{SideEffect, VoiceInputApp};
 use VoiceInput::asr::{AsrConfig, AsrEngine, DashScopeAsrEngine};
 use VoiceInput::audio::CpalAudioCapture;
-use VoiceInput::clipboard::{Clipboard, WlCopyClipboard};
+use VoiceInput::clipboard::WlCopyClipboard;
 use VoiceInput::config::Config;
 use VoiceInput::notification::notify;
 use VoiceInput::state::{AppEvent, AppState};

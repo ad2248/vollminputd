@@ -302,69 +302,54 @@ impl RecognitionSession {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use std::io::Read;
 
     #[tokio::test]
-    #[ignore = "Requires real API key and audio file"]
-    async fn test_asr_stream_recognition() {
-        println!("🐾 喵！开始 ASR 流式识别单元测试~");
+    #[ignore = "Requires real API key"]
+    async fn test_asr_real_recognition() {
+        println!("[INFO] 开始真实 ASR 识别测试");
 
-        // 1. 加载配置
+        // 加载配置
         let config = Config::from_yaml("conf.yaml")
-            .expect("喵！无法加载配置文件 conf.yaml (⊙x⊙;)");
+            .expect("无法加载配置文件 conf.yaml");
 
-        // 2. 创建 ASR 客户端
+        if config.DASHSCOPE_API_KEY.is_empty() {
+            panic!("conf.yaml 中 DASHSCOPE_API_KEY 不能为空");
+        }
+
+        // 创建 ASR 客户端
         let asr_config = AsrConfig {
             api_key: config.DASHSCOPE_API_KEY.clone(),
             ..Default::default()
         };
-
         let client = DashScopeAsrEngine::new(asr_config);
 
-        // 3. 读取音频文件到内存
-        let audio_path = "/home/kals/下载/zh_prompt.wav";
-        let mut audio_file = std::fs::File::open(audio_path)
-            .expect("喵！无法打开音频文件 (⊙x⊙;)");
-        let mut audio_buffer = Vec::new();
-        audio_file.read_to_end(&mut audio_buffer)
-            .expect("喵！无法读取音频文件 (⊙x⊙;)");
+        // 读取测试音频
+        let audio_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/test_audio.wav");
+        let audio_data = std::fs::read(audio_path)
+            .expect("无法读取测试音频文件");
 
-        println!("🐾 喵！音频文件大小：{} 字节", audio_buffer.len());
+        println!("[INFO] 音频文件大小：{} 字节", audio_data.len());
 
-        // 4. 模拟实时音频采集：将音频数据分成小块，每次发送 3200 字节（约 200ms）
-        let chunk_size = 3200; // 16kHz 采样率，16bit，单声道，200ms = 3200 字节
-        let audio_chunks: Vec<Vec<u8>> = audio_buffer
-            .chunks(chunk_size)
-            .map(|chunk| chunk.to_vec())
-            .collect();
+        // 执行识别
+        let result = client.recognize(&audio_data).await
+            .expect("识别失败");
 
-        println!("🐾 喵！音频数据分成 {} 块，准备发送~", audio_chunks.len());
+        println!("[INFO] 识别结果：{}", result);
 
-        // 5. 流式识别 - 启动会话
-        let mut session = client.start_recognition().await
-            .expect("喵！无法启动识别会话 (⊙x⊙;)");
-
-        // 6. 逐个发送音频片段
-        for (i, chunk) in audio_chunks.iter().enumerate() {
-            session.send_audio_chunk(chunk).await
-                .expect("喵！发送音频片段失败 (⊙x⊙;)");
-            println!("🐾 喵！已发送第 {} 个片段", i + 1);
-
-            // 模拟实时音频采集，发送间隔 100ms
-            tokio::time::sleep(Duration::from_millis(100)).await;
+        // 验证结果
+        assert!(!result.is_empty(), "识别结果不应为空");
+        
+        // 预期结果包含这些关键词
+        let expected_keywords = ["对", "账单", "处理"];
+        for keyword in &expected_keywords {
+            assert!(
+                result.contains(keyword),
+                "识别结果应包含 '{}'，实际结果：{}",
+                keyword,
+                result
+            );
         }
 
-        // 7. 完成并获取识别结果
-        let result = session.finish_and_wait_result().await
-            .expect("喵！获取识别结果失败 (⊙x⊙;)");
-
-        println!("🐾 喵！识别结果：{}", result);
-
-        // 8. 验证结果
-        assert!(!result.is_empty(), "喵！识别结果为空...");
-        assert!(result.contains("对") || result.contains("账单") || result.contains("处理"),
-                "喵！识别结果不符合预期，应该包含相关词汇");
-
-        println!("🐾 喵！测试通过啦！ (=・ω・=)");
+        println!("[INFO] ASR 测试通过");
     }
 }
