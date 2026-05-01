@@ -38,6 +38,8 @@ impl AudioCapture for CpalAudioCapture {
             .default_input_device()
             .ok_or_else(|| anyhow::anyhow!("No input device available"))?;
 
+        println!("[INFO] 使用音频输入设备: {}", device.name().unwrap_or_else(|_| "Unknown".to_string()));
+
         let config = cpal::StreamConfig {
             channels: 1,
             sample_rate: 16000,
