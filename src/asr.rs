@@ -118,15 +118,18 @@ impl AsrEngine for DashScopeAsrEngine {
     async fn recognize(&self, audio_data: &[u8]) -> anyhow::Result<String> {
         let mut session = self.start_recognition().await?;
         
-        // Send audio in chunks (3200 bytes ≈ 200ms at 16kHz 16bit mono)
-        let chunk_size = 3200;
-        for chunk in audio_data.chunks(chunk_size) {
-            session.send_audio_chunk(chunk).await?;
-            // Small delay to simulate streaming
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        }
+        println!("[INFO] 发送音频数据：{} 字节", audio_data.len());
         
-        session.finish_and_wait_result().await
+        // 一次性发送所有音频数据
+        session.send_audio_chunk(audio_data).await?;
+        
+        println!("[INFO] 音频发送完成，等待识别结果...");
+        
+        // 注意：不发送 input_audio_buffer.commit 事件
+        // 因为该事件在此 API 版本中会导致错误
+        // 服务器通过 server_vad 自动检测语音结束
+        
+        session.finish_and_wait_result(audio_data.len()).await
     }
 }
 
@@ -137,27 +140,6 @@ impl DashScopeAsrEngine {
     }
 
     /// 启动一个识别会话
-    ///
-    /// # 示例
-    /// ```no_run
-    /// use VoiceInput::asr::{DashScopeAsrEngine, AsrConfig, RecognitionSession};
-    ///
-    /// # async fn example() -> anyhow::Result<()> {
-    /// let config = AsrConfig::default();
-    /// let client = DashScopeAsrEngine::new(config);
-    ///
-    /// // 启动会话
-    /// let mut session: RecognitionSession = client.start_recognition().await?;
-    ///
-    /// // 发送音频片段
-    /// let audio_chunk = vec![0u8; 3200];
-    /// session.send_audio_chunk(&audio_chunk).await?;
-    ///
-    /// // 完成并获取结果
-    /// let result = session.finish_and_wait_result().await?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn start_recognition(&self) -> Result<RecognitionSession> {
         let url_str = format!("{}?model={}", self.config.base_url, self.config.model);
         let url = Url::parse(&url_str)?;
@@ -217,7 +199,7 @@ impl RecognitionSession {
 
         let event_json = serde_json::to_string(&session_event)?;
         self.write.send(Message::Text(event_json.into())).await?;
-        println!("喵！会话配置已发送~ 🐾");
+        println!("[INFO] ASR 会话配置已发送");
 
         Ok(())
     }
@@ -244,58 +226,87 @@ impl RecognitionSession {
         Ok(())
     }
 
-    /// 完成音频发送并等待识别结果
-    pub async fn finish_and_wait_result(mut self) -> Result<String> {
-        println!("喵！音频数据流发送完毕~");
+    /// 计算动态超时时间
+    /// - 音频长度 × 3
+    /// - 下限 20 秒
+    /// - 上限 300 秒
+    fn calculate_timeout(audio_bytes: usize) -> u64 {
+        // 16kHz, 16bit, mono = 32000 bytes/second
+        let audio_seconds = audio_bytes as f64 / 32000.0;
+        let timeout = (audio_seconds * 3.0).ceil() as u64;
+        timeout.clamp(20, 300)
+    }
 
-        // 等待识别结果
+    /// 完成音频发送并等待识别结果
+    pub async fn finish_and_wait_result(mut self, audio_bytes: usize) -> Result<String> {
+        let timeout_secs = Self::calculate_timeout(audio_bytes);
+        println!("[INFO] 等待识别结果（超时：{} 秒）", timeout_secs);
+
         let mut result_text = String::new();
-        let timeout = tokio::time::sleep(Duration::from_secs(60));
+        let mut last_update = tokio::time::Instant::now();
+        let mut check_interval = tokio::time::interval(Duration::from_secs(1));
+        let timeout = tokio::time::sleep(Duration::from_secs(timeout_secs));
         tokio::pin!(timeout);
 
         loop {
             tokio::select! {
                 _ = &mut timeout => {
-                    println!("喵！等待识别结果超时...");
+                    println!("[WARN] 等待识别结果超时（{} 秒）", timeout_secs);
                     break;
+                }
+                _ = check_interval.tick() => {
+                    // 定期检查：如果结果已稳定 3 秒，提前退出
+                    if !result_text.is_empty() && last_update.elapsed().as_secs() >= 3 {
+                        println!("[INFO] 结果已稳定 {} 秒，提前结束", last_update.elapsed().as_secs());
+                        break;
+                    }
                 }
                 msg = self.read.next() => {
                     match msg {
                         Some(Ok(Message::Text(text))) => {
                             if let Ok(server_event) = serde_json::from_str::<ServerEvent>(&text) {
-                                // 只打印重要的事件
+                                // 打印所有非 session 事件（用于调试）
                                 if !server_event.event_type.contains("session.") {
-                                    println!("喵！收到服务器消息：{} (๑•̀ㅂ•́)و✧", text);
+                                    println!("[DEBUG] 服务器事件：{}", server_event.event_type);
+                                    // 打印 error 事件的详细信息
+                                    if server_event.event_type == "error" {
+                                        println!("[WARN] 服务器错误：{}", text);
+                                    }
                                 }
 
+                                // 处理文本结果
                                 if server_event.event_type == "conversation.item.input_audio_transcription.text" {
                                     let text = server_event.text.unwrap_or_default();
                                     let stash = server_event.stash.unwrap_or_default();
-                                    // 拼接 text 和 stash 得到完整结果
-                                    let full_text = if stash.is_empty() {
-                                        text.clone()
-                                    } else if text.is_empty() {
-                                        stash.clone()
-                                    } else {
-                                        format!("{}{}", text, stash)
-                                    };
-                                    if !full_text.is_empty() {
+                                    let full_text = format!("{}{}", text, stash);
+                                    if !full_text.is_empty() && full_text != result_text {
                                         result_text = full_text;
-                                        println!("喵！识别到文本：{} (=・ω・=)", result_text);
+                                        last_update = tokio::time::Instant::now();
+                                        println!("[INFO] 中间结果：{}", result_text);
                                     }
                                 }
+                                
+                                // 检测完成事件（尝试多种可能的事件名）
+                                if server_event.event_type.contains("completed")
+                                    || server_event.event_type.contains("finished")
+                                    || server_event.event_type.contains("done") {
+                                    println!("[INFO] 收到完成事件：{}", server_event.event_type);
+                                    break;
+                                }
+                                
+
                             }
                         }
                         Some(Ok(Message::Close(_))) => {
-                            println!("喵！服务器关闭了连接~");
+                            println!("[INFO] 服务器关闭连接");
                             break;
                         }
                         Some(Err(e)) => {
-                            println!("喵！WebSocket 错误：{} (⊙x⊙;)", e);
+                            println!("[ERROR] WebSocket 错误：{}", e);
                             break;
                         }
                         None => {
-                            println!("喵！连接已关闭~");
+                            println!("[INFO] 连接已关闭");
                             break;
                         }
                         _ => {}
@@ -304,6 +315,7 @@ impl RecognitionSession {
             }
         }
 
+        println!("[INFO] 最终识别结果：{}", result_text);
         Ok(result_text)
     }
 }
@@ -339,6 +351,10 @@ mod tests {
             .expect("无法读取测试音频文件");
 
         println!("[INFO] 音频文件大小：{} 字节", audio_data.len());
+        
+        // 计算预期超时
+        let timeout = RecognitionSession::calculate_timeout(audio_data.len());
+        println!("[INFO] 预期超时时间：{} 秒", timeout);
 
         // 执行识别
         let result = client.recognize(&audio_data).await
@@ -348,6 +364,13 @@ mod tests {
 
         // 验证结果
         assert!(!result.is_empty(), "识别结果不应为空");
+        
+        // 验证结果完整性（不应缺少最后几个字）
+        assert!(
+            result.ends_with("处理掉。") || result.ends_with("处理掉"),
+            "识别结果应完整结束，实际结果：{}",
+            result
+        );
         
         // 预期结果包含这些关键词
         let expected_keywords = ["对", "账单", "处理"];
