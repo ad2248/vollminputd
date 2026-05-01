@@ -118,16 +118,26 @@ impl AsrEngine for DashScopeAsrEngine {
     async fn recognize(&self, audio_data: &[u8]) -> anyhow::Result<String> {
         let mut session = self.start_recognition().await?;
         
-        println!("[INFO] 发送音频数据：{} 字节", audio_data.len());
+        // 分块发送音频，避免单条 WebSocket 消息过大
+        // 每块 6400 字节原始 PCM = 200ms @ 16kHz 16bit mono
+        // Base64 后约 8533 字节
+        const CHUNK_SIZE: usize = 6400;
+        let total_chunks = audio_data.len().div_ceil(CHUNK_SIZE);
         
-        // 一次性发送所有音频数据
-        session.send_audio_chunk(audio_data).await?;
+        println!("[INFO] 发送音频数据：{} 字节，分 {} 块", audio_data.len(), total_chunks);
+        
+        for (i, chunk) in audio_data.chunks(CHUNK_SIZE).enumerate() {
+            session.send_audio_chunk(chunk).await?;
+            if (i + 1) % 10 == 0 || i + 1 == total_chunks {
+                println!("[INFO] 已发送 {} / {} 块", i + 1, total_chunks);
+            }
+            // 每块间隔 50ms，给服务器处理时间
+            if i + 1 < total_chunks {
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
+        }
         
         println!("[INFO] 音频发送完成，等待识别结果...");
-        
-        // 注意：不发送 input_audio_buffer.commit 事件
-        // 因为该事件在此 API 版本中会导致错误
-        // 服务器通过 server_vad 自动检测语音结束
         
         session.finish_and_wait_result(audio_data.len()).await
     }

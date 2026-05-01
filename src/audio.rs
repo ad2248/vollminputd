@@ -65,7 +65,10 @@ impl AudioCapture for CpalAudioCapture {
         self.stream = Some(stream);
         self.is_capturing = true;
         self.start_time = Some(Instant::now());
-        self.buffer.lock().unwrap().clear();
+        let mut buf = self.buffer.lock().unwrap();
+        buf.clear();
+        // 预分配 60 秒容量：16000 * 2 * 60 = 1,920,000 字节
+        buf.reserve(1920000);
 
         Ok(())
     }
