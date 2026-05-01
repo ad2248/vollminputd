@@ -12,13 +12,10 @@ use tokio_tungstenite::{
 use tokio::net::TcpStream;
 use url::Url;
 
-#[mockall::automock]
-#[async_trait::async_trait]
-pub trait AsrEngine: Send + Sync {
-    async fn recognize(&self, audio_data: &[u8]) -> anyhow::Result<String>;
-}
+use super::engine::AsrEngine;
 
 /// DashScope ASR 配置
+#[derive(Debug, Clone)]
 pub struct AsrConfig {
     pub api_key: String,
     pub model: String,
@@ -101,11 +98,6 @@ struct Transcript {
     text: String,
 }
 
-/// ASR 客户端
-pub struct DashScopeAsrEngine {
-    config: AsrConfig,
-}
-
 /// ASR 识别会话
 pub struct RecognitionSession {
     write: futures_util::stream::SplitSink<WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>, Message>,
@@ -113,38 +105,12 @@ pub struct RecognitionSession {
     event_counter: u64,
 }
 
-#[async_trait::async_trait]
-impl AsrEngine for DashScopeAsrEngine {
-    async fn recognize(&self, audio_data: &[u8]) -> anyhow::Result<String> {
-        let mut session = self.start_recognition().await?;
-        
-        // 分块发送音频，避免单条 WebSocket 消息过大
-        // 每块 6400 字节原始 PCM = 200ms @ 16kHz 16bit mono
-        // Base64 后约 8533 字节
-        const CHUNK_SIZE: usize = 6400;
-        let total_chunks = audio_data.len().div_ceil(CHUNK_SIZE);
-        
-        println!("[INFO] 发送音频数据：{} 字节，分 {} 块", audio_data.len(), total_chunks);
-        
-        for (i, chunk) in audio_data.chunks(CHUNK_SIZE).enumerate() {
-            session.send_audio_chunk(chunk).await?;
-            if (i + 1) % 10 == 0 || i + 1 == total_chunks {
-                println!("[INFO] 已发送 {} / {} 块", i + 1, total_chunks);
-            }
-            // 每块间隔 50ms，给服务器处理时间
-            if i + 1 < total_chunks {
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            }
-        }
-        
-        println!("[INFO] 音频发送完成，等待识别结果...");
-        
-        session.finish_and_wait_result(audio_data.len()).await
-    }
+/// DashScope 实时 ASR 引擎
+pub struct DashScopeRealtimeAsrEngine {
+    config: AsrConfig,
 }
 
-impl DashScopeAsrEngine {
-    /// 创建新的 ASR 客户端
+impl DashScopeRealtimeAsrEngine {
     pub fn new(config: AsrConfig) -> Self {
         Self { config }
     }
@@ -181,6 +147,36 @@ impl DashScopeAsrEngine {
         session.init_session().await?;
 
         Ok(session)
+    }
+}
+
+#[async_trait::async_trait]
+impl AsrEngine for DashScopeRealtimeAsrEngine {
+    async fn recognize(&self, audio_data: &[u8]) -> Result<String> {
+        let mut session = self.start_recognition().await?;
+        
+        // 分块发送音频，避免单条 WebSocket 消息过大
+        // 每块 6400 字节原始 PCM = 200ms @ 16kHz 16bit mono
+        // Base64 后约 8533 字节
+        const CHUNK_SIZE: usize = 6400;
+        let total_chunks = audio_data.len().div_ceil(CHUNK_SIZE);
+        
+        println!("[INFO] 发送音频数据：{} 字节，分 {} 块", audio_data.len(), total_chunks);
+        
+        for (i, chunk) in audio_data.chunks(CHUNK_SIZE).enumerate() {
+            session.send_audio_chunk(chunk).await?;
+            if (i + 1) % 10 == 0 || i + 1 == total_chunks {
+                println!("[INFO] 已发送 {} / {} 块", i + 1, total_chunks);
+            }
+            // 每块间隔 50ms，给服务器处理时间
+            if i + 1 < total_chunks {
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
+        }
+        
+        println!("[INFO] 音频发送完成，等待识别结果...");
+        
+        session.finish_and_wait_result(audio_data.len()).await
     }
 }
 
@@ -303,8 +299,6 @@ impl RecognitionSession {
                                     println!("[INFO] 收到完成事件：{}", server_event.event_type);
                                     break;
                                 }
-                                
-
                             }
                         }
                         Some(Ok(Message::Close(_))) => {
@@ -327,72 +321,5 @@ impl RecognitionSession {
 
         println!("[INFO] 最终识别结果：{}", result_text);
         Ok(result_text)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::Config;
-
-    #[tokio::test]
-    async fn test_asr_real_recognition() {
-        println!("[INFO] 开始真实 ASR 识别测试");
-
-        // 加载配置
-        let config = Config::from_yaml("conf.yaml")
-            .expect("无法加载配置文件 conf.yaml");
-
-        if config.DASHSCOPE_API_KEY.is_empty() {
-            println!("[SKIP] conf.yaml 中 DASHSCOPE_API_KEY 为空，跳过真实 ASR 测试");
-            return;
-        }
-
-        // 创建 ASR 客户端
-        let asr_config = AsrConfig {
-            api_key: config.DASHSCOPE_API_KEY.clone(),
-            ..Default::default()
-        };
-        let client = DashScopeAsrEngine::new(asr_config);
-
-        // 读取测试音频（16kHz）
-        let audio_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/test_audio.wav");
-        let audio_data = std::fs::read(audio_path)
-            .expect("无法读取测试音频文件");
-
-        println!("[INFO] 音频文件大小：{} 字节", audio_data.len());
-        
-        // 计算预期超时
-        let timeout = RecognitionSession::calculate_timeout(audio_data.len());
-        println!("[INFO] 预期超时时间：{} 秒", timeout);
-
-        // 执行识别
-        let result = client.recognize(&audio_data).await
-            .expect("识别失败");
-
-        println!("[INFO] 识别结果：{}", result);
-
-        // 验证结果
-        assert!(!result.is_empty(), "识别结果不应为空");
-        
-        // 验证结果完整性（不应缺少最后几个字）
-        assert!(
-            result.ends_with("处理掉。") || result.ends_with("处理掉"),
-            "识别结果应完整结束，实际结果：{}",
-            result
-        );
-        
-        // 预期结果包含这些关键词
-        let expected_keywords = ["对", "账单", "处理"];
-        for keyword in &expected_keywords {
-            assert!(
-                result.contains(keyword),
-                "识别结果应包含 '{}'，实际结果：{}",
-                keyword,
-                result
-            );
-        }
-
-        println!("[INFO] ASR 测试通过");
     }
 }

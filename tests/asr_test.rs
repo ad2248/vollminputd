@@ -1,4 +1,4 @@
-use VoiceInput::asr::{AsrEngine, MockAsrEngine};
+use VoiceInput::asr::engine::{AsrEngine, MockAsrEngine};
 
 #[tokio::test]
 async fn test_mock_recognize_returns_text() {
@@ -35,7 +35,7 @@ async fn test_mock_recognize_empty_result() {
 
 #[tokio::test]
 async fn test_asr_config_defaults() {
-    let config = VoiceInput::asr::AsrConfig::default();
+    let config = VoiceInput::asr::realtime::AsrConfig::default();
     assert_eq!(config.model, "qwen3-asr-flash-realtime");
     assert_eq!(config.base_url, "wss://dashscope.aliyuncs.com/api-ws/v1/realtime");
     assert!(config.api_key.is_empty());

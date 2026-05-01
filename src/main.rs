@@ -1,5 +1,5 @@
 use VoiceInput::app::{SideEffect, VoiceInputApp};
-use VoiceInput::asr::{AsrConfig, AsrEngine, DashScopeAsrEngine};
+use VoiceInput::asr::create_asr_engine;
 use VoiceInput::audio::CpalAudioCapture;
 use VoiceInput::clipboard::WlCopyClipboard;
 use VoiceInput::config::Config;
@@ -30,6 +30,7 @@ async fn main() -> anyhow::Result<()> {
             max_recording_seconds: 60,
             audio_sample_rate: 16000,
             audio_channels: 1,
+            asr_strategy: VoiceInput::config::AsrStrategy::DashscopeRealtime,
         }
     });
 
@@ -59,8 +60,9 @@ async fn main() -> anyhow::Result<()> {
 
     let (event_tx, mut event_rx) = mpsc::channel::<AppEvent>(10);
 
-    let asr_api_key = config.DASHSCOPE_API_KEY.clone();
     let max_recording_seconds = config.max_recording_seconds;
+    
+    // 配置已保存，ASR 引擎会在需要时通过工厂函数创建
 
     println!("[INFO] 程序就绪，等待快捷键触发...");
 
@@ -103,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
             for effect in &effects {
                 execute_effect_with_asr(
                     effect,
-                    &asr_api_key,
+                    &config,
                     &event_tx,
                 );
             }
@@ -132,20 +134,17 @@ fn execute_effect(effect: &SideEffect) {
 
 fn execute_effect_with_asr(
     effect: &SideEffect,
-    api_key: &str,
+    config: &Config,
     tx: &mpsc::Sender<AppEvent>,
 ) {
     match effect {
         SideEffect::RequestAsr { pcm_data } => {
             println!("[INFO] 副作用: 请求 ASR 识别 ({} 字节)", pcm_data.len());
             let tx = tx.clone();
-            let key = api_key.to_string();
             let pcm = pcm_data.clone();
+            // 每次请求都创建新的引擎实例
+            let engine = create_asr_engine(config);
             tokio::spawn(async move {
-                let engine = DashScopeAsrEngine::new(AsrConfig {
-                    api_key: key,
-                    ..Default::default()
-                });
                 match engine.recognize(&pcm).await {
                     Ok(text) if !text.is_empty() => {
                         println!("[INFO] ASR 识别成功: '{}'", text);

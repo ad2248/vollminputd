@@ -1,5 +1,5 @@
 use VoiceInput::app::{SideEffect, VoiceInputApp};
-use VoiceInput::asr::{AsrEngine, MockAsrEngine};
+use VoiceInput::asr::engine::{AsrEngine, MockAsrEngine};
 use VoiceInput::audio::MockAudioCapture;
 use VoiceInput::clipboard::MockClipboard;
 use VoiceInput::state::{AppEvent, AppState};
