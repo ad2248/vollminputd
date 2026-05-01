@@ -1,9 +1,9 @@
 use VoiceInput::app::{SideEffect, VoiceInputApp};
 use VoiceInput::asr::{AsrConfig, AsrEngine, DashScopeAsrEngine};
 use VoiceInput::audio::CpalAudioCapture;
-use VoiceInput::clipboard::WlCopyClipboard;
+use VoiceInput::clipboard::{Clipboard, WlCopyClipboard};
 use VoiceInput::config::Config;
-use VoiceInput::gui::VoiceInputGui;
+use VoiceInput::notification::notify;
 use VoiceInput::state::{AppEvent, AppState};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
@@ -14,17 +14,17 @@ use tokio::sync::mpsc;
 
 const FIFO_PATH: &str = "/tmp/amao_voice_ime.fifo";
 
+#[derive(Debug)]
 enum ImeCommand {
-    Start,
-    Stop,
+    Toggle,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    println!("喵！阿猫的 Rust 语音输入法守护进程启动啦！🐾");
+    println!("[INFO] 语音输入法守护进程启动");
 
     let config = Config::from_yaml("conf.yaml").unwrap_or_else(|e| {
-        eprintln!("警告：无法加载配置文件: {}, 使用默认配置", e);
+        eprintln!("[WARN] 无法加载配置文件: {}, 使用默认配置", e);
         Config {
             DASHSCOPE_API_KEY: String::new(),
             max_recording_seconds: 60,
@@ -34,163 +34,139 @@ async fn main() -> anyhow::Result<()> {
     });
 
     setup_fifo(FIFO_PATH)?;
+    println!("[INFO] FIFO 已创建: {}", FIFO_PATH);
 
-    let gui = VoiceInputGui::new()?;
     let audio = CpalAudioCapture::new();
     let clipboard = WlCopyClipboard::new();
     let mut app = VoiceInputApp::new(audio, clipboard);
 
     let (fifo_tx, mut fifo_rx) = mpsc::channel::<ImeCommand>(10);
 
-    thread::spawn(move || loop {
-        if let Ok(file) = File::open(FIFO_PATH) {
-            let reader = BufReader::new(file);
-            for line in reader.lines().flatten() {
-                let cmd = line.trim();
-                if cmd == "START" {
-                    let _ = fifo_tx.blocking_send(ImeCommand::Start);
-                } else if cmd == "STOP" {
-                    let _ = fifo_tx.blocking_send(ImeCommand::Stop);
+    thread::spawn(move || {
+        println!("[INFO] FIFO 监听线程已启动");
+        loop {
+            if let Ok(file) = File::open(FIFO_PATH) {
+                let reader = BufReader::new(file);
+                for line in reader.lines().flatten() {
+                    let cmd = line.trim();
+                    if cmd == "TOGGLE" {
+                        let _ = fifo_tx.blocking_send(ImeCommand::Toggle);
+                    }
                 }
             }
         }
     });
 
-    let (gui_tx, mut gui_rx) = mpsc::channel::<AppEvent>(10);
-
-    {
-        let tx = gui_tx.clone();
-        gui.on_start_recording(move || {
-            let _ = tx.blocking_send(AppEvent::StartRecording);
-        });
-    }
-    {
-        let tx = gui_tx.clone();
-        gui.on_finish_recording(move || {
-            let _ = tx.blocking_send(AppEvent::FinishRecording);
-        });
-    }
-    {
-        let tx = gui_tx.clone();
-        gui.on_cancel(move || {
-            let _ = tx.blocking_send(AppEvent::Cancel);
-        });
-    }
-    {
-        let tx = gui_tx.clone();
-        gui.on_retry(move || {
-            let _ = tx.blocking_send(AppEvent::Retry);
-        });
-    }
-    {
-        let tx = gui_tx.clone();
-        gui.on_accept_result(move || {
-            let _ = tx.blocking_send(AppEvent::Accept);
-        });
-    }
+    let (event_tx, mut event_rx) = mpsc::channel::<AppEvent>(10);
 
     let asr_api_key = config.DASHSCOPE_API_KEY.clone();
     let max_recording_seconds = config.max_recording_seconds;
 
-    gui.show()?;
-    gui.update_state(&app.state);
+    println!("[INFO] 程序就绪，等待快捷键触发...");
 
     loop {
         let mut event: Option<AppEvent> = None;
 
         tokio::select! {
             Some(cmd) = fifo_rx.recv() => {
+                println!("[INFO] 收到 FIFO 命令: {:?}", cmd);
                 match cmd {
-                    ImeCommand::Start => event = Some(AppEvent::StartRecording),
-                    ImeCommand::Stop => event = Some(AppEvent::FinishRecording),
+                    ImeCommand::Toggle => {
+                        event = Some(AppEvent::ToggleRecording);
+                    }
                 }
             }
-            Some(gui_event) = gui_rx.recv() => {
-                event = Some(gui_event);
+            Some(asr_event) = event_rx.recv() => {
+                println!("[INFO] 收到 ASR 事件: {:?}", asr_event);
+                event = Some(asr_event);
             }
             _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {}
         }
 
+        // 检查录音超时
         if matches!(app.state, AppState::Recording) {
             let (poll_effects, timeout) = app.poll_recording(max_recording_seconds);
-            execute_effects(&gui, &poll_effects);
+            for effect in &poll_effects {
+                execute_effect(effect);
+            }
             if timeout {
-                event = Some(AppEvent::FinishRecording);
+                println!("[INFO] 录音超时，自动停止");
+                event = Some(AppEvent::ToggleRecording);
             }
         }
 
         if let Some(incoming) = event {
+            println!("[INFO] 处理事件: {:?}", incoming);
             let effects = app.handle_event(incoming).await;
-            execute_effects_with_asr(
-                &gui,
-                &effects,
-                &asr_api_key,
-                &gui_tx,
-            );
+            println!("[INFO] 事件处理完成，新状态: {:?}", app.state);
+            
+            for effect in &effects {
+                execute_effect_with_asr(
+                    effect,
+                    &asr_api_key,
+                    &event_tx,
+                );
+            }
         }
     }
 }
 
-fn execute_effects(gui: &VoiceInputGui, effects: &[SideEffect]) {
-    for effect in effects {
-        match effect {
-            SideEffect::UpdateState(state) => gui.update_state(state),
-            SideEffect::SetResultText(text) => gui.set_result_text(text),
-            SideEffect::SetErrorMessage(msg) => gui.set_error_message(msg),
-            SideEffect::SetRecordingDuration(secs) => gui.set_recording_duration(*secs),
-            SideEffect::Hide => gui.hide(),
-            SideEffect::RequestAsr { .. } => {}
+fn execute_effect(effect: &SideEffect) {
+    match effect {
+        SideEffect::StartAudio => {
+            println!("[INFO] 副作用: 启动音频采集");
         }
+        SideEffect::StopAudio => {
+            println!("[INFO] 副作用: 停止音频采集");
+        }
+        SideEffect::Notify { title, body, timeout_secs } => {
+            println!("[INFO] 副作用: 发送通知 - {} ({})", title, body);
+            notify(title, body, *timeout_secs);
+        }
+        SideEffect::CopyToClipboard(text) => {
+            println!("[INFO] 副作用: 复制到剪贴板 - '{}'", text);
+        }
+        SideEffect::RequestAsr { .. } => {}
     }
 }
 
-fn execute_effects_with_asr(
-    gui: &VoiceInputGui,
-    effects: &[SideEffect],
+fn execute_effect_with_asr(
+    effect: &SideEffect,
     api_key: &str,
     tx: &mpsc::Sender<AppEvent>,
 ) {
-    for effect in effects {
-        match effect {
-            SideEffect::UpdateState(state) => gui.update_state(state),
-            SideEffect::SetResultText(text) => gui.set_result_text(text),
-            SideEffect::SetErrorMessage(msg) => gui.set_error_message(msg),
-            SideEffect::SetRecordingDuration(secs) => gui.set_recording_duration(*secs),
-            SideEffect::Hide => gui.hide(),
-            SideEffect::RequestAsr { pcm_data } => {
-                let tx = tx.clone();
-                let key = api_key.to_string();
-                let pcm = pcm_data.clone();
-                tokio::spawn(async move {
-                    let engine = DashScopeAsrEngine::new(AsrConfig {
-                        api_key: key,
-                        ..Default::default()
-                    });
-                    match engine.recognize(&pcm).await {
-                        Ok(text) if !text.is_empty() => {
-                            let _ = tx
-                                .send(AppEvent::TranscriptionComplete(text))
-                                .await;
-                        }
-                        Ok(_) => {
-                            let _ = tx
-                                .send(AppEvent::TranscriptionFailed(
-                                    "未检测到语音".to_string(),
-                                ))
-                                .await;
-                        }
-                        Err(e) => {
-                            let _ = tx
-                                .send(AppEvent::TranscriptionFailed(format!(
-                                    "识别失败: {}",
-                                    e
-                                )))
-                                .await;
-                        }
-                    }
+    match effect {
+        SideEffect::RequestAsr { pcm_data } => {
+            println!("[INFO] 副作用: 请求 ASR 识别 ({} 字节)", pcm_data.len());
+            let tx = tx.clone();
+            let key = api_key.to_string();
+            let pcm = pcm_data.clone();
+            tokio::spawn(async move {
+                let engine = DashScopeAsrEngine::new(AsrConfig {
+                    api_key: key,
+                    ..Default::default()
                 });
-            }
+                match engine.recognize(&pcm).await {
+                    Ok(text) if !text.is_empty() => {
+                        println!("[INFO] ASR 识别成功: '{}'", text);
+                        let _ = tx.send(AppEvent::TranscriptionComplete(text)).await;
+                    }
+                    Ok(_) => {
+                        println!("[INFO] ASR 返回空结果");
+                        let _ = tx
+                            .send(AppEvent::TranscriptionFailed("未检测到语音".to_string()))
+                            .await;
+                    }
+                    Err(e) => {
+                        println!("[ERROR] ASR 识别失败: {}", e);
+                        let _ = tx
+                            .send(AppEvent::TranscriptionFailed(format!("识别失败: {}", e)))
+                            .await;
+                    }
+                }
+            });
         }
+        _ => execute_effect(effect),
     }
 }
 
