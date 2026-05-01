@@ -85,6 +85,8 @@ struct ServerEvent {
     item: Option<Item>,
     #[serde(default)]
     text: Option<String>,
+    #[serde(default)]
+    stash: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -248,7 +250,7 @@ impl RecognitionSession {
 
         // 等待识别结果
         let mut result_text = String::new();
-        let timeout = tokio::time::sleep(Duration::from_secs(30));
+        let timeout = tokio::time::sleep(Duration::from_secs(60));
         tokio::pin!(timeout);
 
         loop {
@@ -267,11 +269,19 @@ impl RecognitionSession {
                                 }
 
                                 if server_event.event_type == "conversation.item.input_audio_transcription.text" {
-                                    if let Some(text) = server_event.text {
-                                        if !text.is_empty() {
-                                            result_text = text;
-                                            println!("喵！识别到文本：{} (=・ω・=)", result_text);
-                                        }
+                                    let text = server_event.text.unwrap_or_default();
+                                    let stash = server_event.stash.unwrap_or_default();
+                                    // 拼接 text 和 stash 得到完整结果
+                                    let full_text = if stash.is_empty() {
+                                        text.clone()
+                                    } else if text.is_empty() {
+                                        stash.clone()
+                                    } else {
+                                        format!("{}{}", text, stash)
+                                    };
+                                    if !full_text.is_empty() {
+                                        result_text = full_text;
+                                        println!("喵！识别到文本：{} (=・ω・=)", result_text);
                                     }
                                 }
                             }
@@ -304,7 +314,6 @@ mod tests {
     use crate::config::Config;
 
     #[tokio::test]
-    #[ignore = "Requires real API key"]
     async fn test_asr_real_recognition() {
         println!("[INFO] 开始真实 ASR 识别测试");
 
@@ -313,7 +322,8 @@ mod tests {
             .expect("无法加载配置文件 conf.yaml");
 
         if config.DASHSCOPE_API_KEY.is_empty() {
-            panic!("conf.yaml 中 DASHSCOPE_API_KEY 不能为空");
+            println!("[SKIP] conf.yaml 中 DASHSCOPE_API_KEY 为空，跳过真实 ASR 测试");
+            return;
         }
 
         // 创建 ASR 客户端
@@ -323,7 +333,7 @@ mod tests {
         };
         let client = DashScopeAsrEngine::new(asr_config);
 
-        // 读取测试音频
+        // 读取测试音频（16kHz）
         let audio_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/test_audio.wav");
         let audio_data = std::fs::read(audio_path)
             .expect("无法读取测试音频文件");
