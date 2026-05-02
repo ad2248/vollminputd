@@ -3,7 +3,7 @@ use VoiceInput::config::Config;
 #[test]
 fn test_load_full_config() {
     let yaml = r#"
-DASHSCOPE_API_KEY: "test-key"
+dashscope_api_key: "test-key"
 max_recording_seconds: 120
 audio_sample_rate: 44100
 audio_channels: 2
@@ -12,7 +12,7 @@ audio_channels: 2
     std::fs::write(&temp_file, yaml).unwrap();
 
     let config = Config::from_yaml(temp_file.to_str().unwrap()).unwrap();
-    assert_eq!(config.DASHSCOPE_API_KEY, "test-key");
+    assert_eq!(config.dashscope_api_key, "test-key");
     assert_eq!(config.max_recording_seconds, 120);
     assert_eq!(config.audio_sample_rate, 44100);
     assert_eq!(config.audio_channels, 2);
@@ -22,12 +22,12 @@ audio_channels: 2
 
 #[test]
 fn test_load_minimal_config() {
-    let yaml = r#"DASHSCOPE_API_KEY: "minimal-key""#;
+    let yaml = r#"dashscope_api_key: "minimal-key""#;
     let temp_file = std::env::temp_dir().join("test_minimal_config.yaml");
     std::fs::write(&temp_file, yaml).unwrap();
 
     let config = Config::from_yaml(temp_file.to_str().unwrap()).unwrap();
-    assert_eq!(config.DASHSCOPE_API_KEY, "minimal-key");
+    assert_eq!(config.dashscope_api_key, "minimal-key");
     assert_eq!(config.max_recording_seconds, 60);
     assert_eq!(config.audio_sample_rate, 16000);
     assert_eq!(config.audio_channels, 1);
@@ -56,14 +56,14 @@ fn test_missing_file_returns_error() {
 #[test]
 fn test_partial_config_with_defaults() {
     let yaml = r#"
-DASHSCOPE_API_KEY: "partial-key"
+dashscope_api_key: "partial-key"
 max_recording_seconds: 90
 "#;
     let temp_file = std::env::temp_dir().join("test_partial_config.yaml");
     std::fs::write(&temp_file, yaml).unwrap();
 
     let config = Config::from_yaml(temp_file.to_str().unwrap()).unwrap();
-    assert_eq!(config.DASHSCOPE_API_KEY, "partial-key");
+    assert_eq!(config.dashscope_api_key, "partial-key");
     assert_eq!(config.max_recording_seconds, 90);
     assert_eq!(config.audio_sample_rate, 16000);
     assert_eq!(config.audio_channels, 1);

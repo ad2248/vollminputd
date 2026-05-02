@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_yaml("conf.yaml").unwrap_or_else(|e| {
         eprintln!("[WARN] 无法加载配置文件: {}, 使用默认配置", e);
         Config {
-            DASHSCOPE_API_KEY: String::new(),
+            dashscope_api_key: String::new(),
             max_recording_seconds: 60,
             audio_sample_rate: 16000,
             audio_channels: 1,

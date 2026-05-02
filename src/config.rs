@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub DASHSCOPE_API_KEY: String,
+    pub dashscope_api_key: String,
 
     #[serde(default = "default_max_recording_seconds")]
     pub max_recording_seconds: u64,
