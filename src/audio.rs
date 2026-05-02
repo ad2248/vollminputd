@@ -10,6 +10,7 @@ pub trait AudioCapture: Send + Sync {
     async fn stop_capture(&mut self) -> Result<Vec<u8>>;
     fn is_capturing(&self) -> bool;
     fn elapsed_seconds(&self) -> u64;
+    fn device_name(&self) -> Option<String>;
 }
 
 pub struct CpalAudioCapture {
@@ -17,15 +18,22 @@ pub struct CpalAudioCapture {
     is_capturing: bool,
     start_time: Option<Instant>,
     stream: Option<cpal::Stream>,
+    device_name: Option<String>,
 }
 
 impl CpalAudioCapture {
     pub fn new() -> Self {
+        let host = cpal::default_host();
+        let device_name = host
+            .default_input_device()
+            .and_then(|d| d.name().ok());
+
         Self {
             buffer: Arc::new(Mutex::new(Vec::new())),
             is_capturing: false,
             start_time: None,
             stream: None,
+            device_name,
         }
     }
 }
@@ -38,7 +46,9 @@ impl AudioCapture for CpalAudioCapture {
             .default_input_device()
             .ok_or_else(|| anyhow::anyhow!("No input device available"))?;
 
-        println!("[INFO] 使用音频输入设备: {}", device.name().unwrap_or_else(|_| "Unknown".to_string()));
+        let device_name = device.name().ok();
+        println!("[INFO] 使用音频输入设备: {}", device_name.as_deref().unwrap_or("Unknown"));
+        self.device_name = device_name;
 
         let config = cpal::StreamConfig {
             channels: 1,
@@ -89,6 +99,10 @@ impl AudioCapture for CpalAudioCapture {
 
     fn elapsed_seconds(&self) -> u64 {
         self.start_time.map(|t| t.elapsed().as_secs()).unwrap_or(0)
+    }
+
+    fn device_name(&self) -> Option<String> {
+        self.device_name.clone()
     }
 }
 

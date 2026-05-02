@@ -58,10 +58,12 @@ impl<A: AudioCapture, C: Clipboard> VoiceInputApp<A, C> {
                 } else {
                     self.recording_start = Some(tokio::time::Instant::now());
                     self.last_reported_seconds = None;
+                    let device_name = self.audio.device_name()
+                        .unwrap_or_else(|| "未知设备".to_string());
                     effects.push(SideEffect::StartAudio);
                     effects.push(SideEffect::Notify {
                         title: "开始录音".to_string(),
-                        body: "正在录音，请说话...".to_string(),
+                        body: format!("正在使用 {} 录音，请说话...", device_name),
                         timeout_secs: 5,
                     });
                 }
@@ -137,9 +139,11 @@ impl<A: AudioCapture, C: Clipboard> VoiceInputApp<A, C> {
             // 只在秒数变化时返回通知，避免重复发送
             if self.last_reported_seconds != Some(elapsed) {
                 self.last_reported_seconds = Some(elapsed);
+                let device_name = self.audio.device_name()
+                    .unwrap_or_else(|| "未知设备".to_string());
                 let effects = vec![SideEffect::Notify {
                     title: "录音中".to_string(),
-                    body: format!("已录制 {} 秒", elapsed),
+                    body: format!("已录制 {} 秒 ({})", elapsed, device_name),
                     timeout_secs: 1,
                 }];
                 (effects, timeout)
