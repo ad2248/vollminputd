@@ -23,16 +23,7 @@ enum ImeCommand {
 async fn main() -> anyhow::Result<()> {
     println!("[INFO] 语音输入法守护进程启动");
 
-    let config = Config::from_yaml("conf.yaml").unwrap_or_else(|e| {
-        eprintln!("[WARN] 无法加载配置文件: {}, 使用默认配置", e);
-        Config {
-            dashscope_api_key: String::new(),
-            max_recording_seconds: 60,
-            audio_sample_rate: 16000,
-            audio_channels: 1,
-            asr_strategy: VoiceInput::config::AsrStrategy::DashscopeRealtime,
-        }
-    });
+    let config = Config::from_yaml("conf.yaml")?;
 
     setup_fifo(FIFO_PATH)?;
     println!("[INFO] FIFO 已创建: {}", FIFO_PATH);
