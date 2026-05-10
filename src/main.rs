@@ -5,28 +5,50 @@ use VoiceInput::clipboard::WlCopyClipboard;
 use VoiceInput::config::Config;
 use VoiceInput::notification::notify;
 use VoiceInput::state::{AppEvent, AppState};
+use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::Command;
+use std::process::{self, Command};
 use std::thread;
 use tokio::sync::mpsc;
-
-const FIFO_PATH: &str = "/tmp/amao_voice_ime.fifo";
 
 #[derive(Debug)]
 enum ImeCommand {
     Toggle,
 }
 
+fn parse_instance_arg() -> String {
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--instance" {
+            if let Some(instance) = args.next() {
+                if instance.contains('/') {
+                    eprintln!("[ERROR] 实例名不能包含 '/'");
+                    process::exit(1);
+                }
+                return instance;
+            } else {
+                eprintln!("[ERROR] --instance 缺少值");
+                process::exit(1);
+            }
+        }
+    }
+    eprintln!("Usage: {} --instance <NAME>", env::args().next().unwrap_or_else(|| "voice-input".to_string()));
+    process::exit(1);
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     println!("[INFO] 语音输入法守护进程启动");
 
+    let instance = parse_instance_arg();
+    let fifo_path = format!("/tmp/amao_voice_ime_{}.fifo", instance);
+
     let config = Config::from_yaml("conf.yaml")?;
 
-    setup_fifo(FIFO_PATH)?;
-    println!("[INFO] FIFO 已创建: {}", FIFO_PATH);
+    setup_fifo(&fifo_path)?;
+    println!("[INFO] FIFO 已创建: {}", fifo_path);
 
     let audio = CpalAudioCapture::new();
     let clipboard = WlCopyClipboard::new();
@@ -35,9 +57,9 @@ async fn main() -> anyhow::Result<()> {
     let (fifo_tx, mut fifo_rx) = mpsc::channel::<ImeCommand>(10);
 
     thread::spawn(move || {
-        println!("[INFO] FIFO 监听线程已启动");
+        println!("[INFO] FIFO 监听线程已启动: {}", fifo_path);
         loop {
-            if let Ok(file) = File::open(FIFO_PATH) {
+            if let Ok(file) = File::open(&fifo_path) {
                 let reader = BufReader::new(file);
                 for line in reader.lines().flatten() {
                     let cmd = line.trim();
