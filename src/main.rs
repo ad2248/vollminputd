@@ -3,7 +3,7 @@ use VoiceInput::asr::create_asr_engine;
 use VoiceInput::audio::CpalAudioCapture;
 use VoiceInput::clipboard::WlCopyClipboard;
 use VoiceInput::config::Config;
-use VoiceInput::notification::notify;
+use VoiceInput::notifier::{Notifier, NotifyRustNotifier};
 use VoiceInput::state::{AppEvent, AppState};
 use std::env;
 use std::fs::{self, File};
@@ -46,6 +46,7 @@ async fn main() -> anyhow::Result<()> {
     let fifo_path = format!("/tmp/amao_voice_ime_{}.fifo", instance);
 
     let config = Config::from_yaml("conf.yaml")?;
+    let notifier = NotifyRustNotifier;
 
     setup_fifo(&fifo_path)?;
     println!("[INFO] FIFO 已创建: {}", fifo_path);
@@ -102,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
         if matches!(app.state, AppState::Recording) {
             let (poll_effects, timeout) = app.poll_recording(max_recording_seconds);
             for effect in &poll_effects {
-                execute_effect(effect);
+                execute_effect(effect, &notifier);
             }
             if timeout {
                 println!("[INFO] 录音超时，自动停止");
@@ -120,13 +121,14 @@ async fn main() -> anyhow::Result<()> {
                     effect,
                     &config,
                     &event_tx,
+                    &notifier,
                 );
             }
         }
     }
 }
 
-fn execute_effect(effect: &SideEffect) {
+fn execute_effect(effect: &SideEffect, notifier: &dyn Notifier) {
     match effect {
         SideEffect::StartAudio => {
             println!("[INFO] 副作用: 启动音频采集");
@@ -136,7 +138,7 @@ fn execute_effect(effect: &SideEffect) {
         }
         SideEffect::Notify { title, body, timeout_secs } => {
             println!("[INFO] 副作用: 发送通知 - {} ({})", title, body);
-            notify(title, body, *timeout_secs);
+            let _ = notifier.notify(title, body, *timeout_secs);
         }
         SideEffect::CopyToClipboard(text) => {
             println!("[INFO] 副作用: 复制到剪贴板 - '{}'", text);
@@ -149,6 +151,7 @@ fn execute_effect_with_asr(
     effect: &SideEffect,
     config: &Config,
     tx: &mpsc::Sender<AppEvent>,
+    notifier: &dyn Notifier,
 ) {
     match effect {
         SideEffect::RequestAsr { pcm_data } => {
@@ -178,7 +181,7 @@ fn execute_effect_with_asr(
                 }
             });
         }
-        _ => execute_effect(effect),
+        _ => execute_effect(effect, notifier),
     }
 }
 
