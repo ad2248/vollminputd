@@ -30,10 +30,10 @@ cd VoiceInput
 
 ### 2. 配置 API 密钥
 
+VoiceInput 使用环境变量进行配置。启动前必须设置 `VOICEINPUT_DASHSCOPE_API_KEY`：
+
 ```bash
-cp conf.yaml.tmpl conf.yaml
-# 编辑 conf.yaml，填入你的 DashScope API 密钥
-dashscope_api_key: "your-api-key-here"
+export VOICEINPUT_DASHSCOPE_API_KEY="your-api-key"
 ```
 
 > 获取 DashScope API 密钥：[阿里云 DashScope](https://dashscope.aliyun.com/)
@@ -45,6 +45,8 @@ cargo build --release
 ```
 
 ### 4. 启动守护进程
+
+确保已设置所需环境变量，然后启动守护进程：
 
 ```bash
 ./target/release/VoiceInput --instance default
@@ -66,24 +68,24 @@ echo "TOGGLE" > /tmp/amao_voice_ime_default.fifo
 
 ## 配置说明
 
-`conf.yaml` 支持以下配置项：
+VoiceInput 通过环境变量进行配置：
 
-| 配置项 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `dashscope_api_key` | string | `""` | **必填**，DashScope API 密钥 |
-| `asr_strategy` | string | `"dashscope_realtime"` | ASR 策略：`dashscope_realtime`（实时）或 `omni_plus`（高质量） |
-| `max_recording_seconds` | integer | `60` | 最大录音时长（秒），超时自动停止 |
-| `audio_sample_rate` | integer | `16000` | 音频采样率（Hz） |
-| `audio_channels` | integer | `1` | 音频通道数 |
+| 环境变量 | 类型 | 默认值 | 说明 |
+|----------|------|--------|------|
+| `VOICEINPUT_DASHSCOPE_API_KEY` | string | - | **必填**，DashScope API 密钥 |
+| `VOICEINPUT_ASR_STRATEGY` | string | `"dashscope_realtime"` | ASR 策略：`dashscope_realtime`（实时）或 `omni_plus`（高质量） |
+| `VOICEINPUT_MAX_RECORDING_SECONDS` | integer | `60` | 最大录音时长（秒），超时自动停止 |
+| `VOICEINPUT_AUDIO_SAMPLE_RATE` | integer | `16000` | 音频采样率（Hz） |
+| `VOICEINPUT_AUDIO_CHANNELS` | integer | `1` | 音频通道数 |
 
 ### 配置示例
 
-```yaml
-dashscope_api_key: "sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-asr_strategy: "dashscope_realtime"
-max_recording_seconds: 60
-audio_sample_rate: 16000
-audio_channels: 1
+```bash
+export VOICEINPUT_DASHSCOPE_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+export VOICEINPUT_ASR_STRATEGY="dashscope_realtime"
+export VOICEINPUT_MAX_RECORDING_SECONDS="60"
+export VOICEINPUT_AUDIO_SAMPLE_RATE="16000"
+export VOICEINPUT_AUDIO_CHANNELS="1"
 ```
 
 ## ASR 策略对比
@@ -134,7 +136,7 @@ audio_channels: 1
 | `asr/` | ASR 引擎抽象及两种实现（实时 / OmniPlus） |
 | `clipboard.rs` | Wayland 剪贴板操作（`wl-copy`） |
 | `notifier/` | 桌面通知抽象及 `notify-rust` 实现 |
-| `config.rs` | YAML 配置解析 |
+| `config.rs` | 环境变量配置解析 |
 
 ## 快捷键绑定示例
 
@@ -180,8 +182,6 @@ cargo test config
 ```
 VoiceInput/
 ├── Cargo.toml              # 项目配置
-├── conf.yaml               # 运行时配置（Git 忽略）
-├── conf.yaml.tmpl          # 配置模板
 ├── src/
 │   ├── main.rs             # 守护进程入口
 │   ├── lib.rs              # 库入口
@@ -214,7 +214,7 @@ VoiceInput/
 | `reqwest` | HTTP/HTTPS 客户端 |
 | `tokio-tungstenite` | WebSocket 客户端（实时 ASR） |
 | `notify-rust` | Linux 桌面通知（D-Bus） |
-| `serde` + `serde_yaml` | 配置序列化/反序列化 |
+| `serde` | 数据序列化/反序列化 |
 | `anyhow` | 错误处理 |
 | `mockall` | 测试 Mock |
 

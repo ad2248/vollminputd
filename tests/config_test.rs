@@ -1,72 +1,99 @@
-use VoiceInput::config::Config;
+use VoiceInput::config::{AsrStrategy, Config};
+use std::env;
+use std::sync::Mutex;
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn clear_env_vars() {
+    for key in [
+        "VOICEINPUT_DASHSCOPE_API_KEY",
+        "VOICEINPUT_ASR_STRATEGY",
+        "VOICEINPUT_MAX_RECORDING_SECONDS",
+        "VOICEINPUT_AUDIO_SAMPLE_RATE",
+        "VOICEINPUT_AUDIO_CHANNELS",
+    ] {
+        unsafe { env::remove_var(key); }
+    }
+}
 
 #[test]
 fn test_load_full_config() {
-    let yaml = r#"
-dashscope_api_key: "test-key"
-max_recording_seconds: 120
-audio_sample_rate: 44100
-audio_channels: 2
-"#;
-    let temp_file = std::env::temp_dir().join("test_full_config.yaml");
-    std::fs::write(&temp_file, yaml).unwrap();
+    let _guard = ENV_LOCK.lock().unwrap();
+    clear_env_vars();
+    unsafe { env::set_var("VOICEINPUT_DASHSCOPE_API_KEY", "test-key"); }
+    unsafe { env::set_var("VOICEINPUT_MAX_RECORDING_SECONDS", "120"); }
+    unsafe { env::set_var("VOICEINPUT_AUDIO_SAMPLE_RATE", "44100"); }
+    unsafe { env::set_var("VOICEINPUT_AUDIO_CHANNELS", "2"); }
+    unsafe { env::set_var("VOICEINPUT_ASR_STRATEGY", "omni_plus"); }
 
-    let config = Config::from_yaml(temp_file.to_str().unwrap()).unwrap();
+    let config = Config::from_env().unwrap();
     assert_eq!(config.dashscope_api_key, "test-key");
     assert_eq!(config.max_recording_seconds, 120);
     assert_eq!(config.audio_sample_rate, 44100);
     assert_eq!(config.audio_channels, 2);
-
-    std::fs::remove_file(temp_file).unwrap();
+    assert_eq!(config.asr_strategy, AsrStrategy::OmniPlus);
 }
 
 #[test]
 fn test_load_minimal_config() {
-    let yaml = r#"dashscope_api_key: "minimal-key""#;
-    let temp_file = std::env::temp_dir().join("test_minimal_config.yaml");
-    std::fs::write(&temp_file, yaml).unwrap();
+    let _guard = ENV_LOCK.lock().unwrap();
+    clear_env_vars();
+    unsafe { env::set_var("VOICEINPUT_DASHSCOPE_API_KEY", "minimal-key"); }
 
-    let config = Config::from_yaml(temp_file.to_str().unwrap()).unwrap();
+    let config = Config::from_env().unwrap();
     assert_eq!(config.dashscope_api_key, "minimal-key");
     assert_eq!(config.max_recording_seconds, 60);
     assert_eq!(config.audio_sample_rate, 16000);
     assert_eq!(config.audio_channels, 1);
-
-    std::fs::remove_file(temp_file).unwrap();
+    assert_eq!(config.asr_strategy, AsrStrategy::DashscopeRealtime);
 }
 
 #[test]
-fn test_invalid_yaml_returns_error() {
-    let yaml = "not valid yaml: [unclosed";
-    let temp_file = std::env::temp_dir().join("test_invalid_config.yaml");
-    std::fs::write(&temp_file, yaml).unwrap();
+fn test_missing_api_key_returns_error() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    clear_env_vars();
 
-    let result = Config::from_yaml(temp_file.to_str().unwrap());
+    let result = Config::from_env();
     assert!(result.is_err());
-
-    std::fs::remove_file(temp_file).unwrap();
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("VOICEINPUT_DASHSCOPE_API_KEY"));
 }
 
 #[test]
-fn test_missing_file_returns_error() {
-    let result = Config::from_yaml("/nonexistent/path/config.yaml");
+fn test_invalid_asr_strategy_returns_error() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    clear_env_vars();
+    unsafe { env::set_var("VOICEINPUT_DASHSCOPE_API_KEY", "test-key"); }
+    unsafe { env::set_var("VOICEINPUT_ASR_STRATEGY", "invalid_strategy"); }
+
+    let result = Config::from_env();
     assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("VOICEINPUT_ASR_STRATEGY"));
 }
 
 #[test]
 fn test_partial_config_with_defaults() {
-    let yaml = r#"
-dashscope_api_key: "partial-key"
-max_recording_seconds: 90
-"#;
-    let temp_file = std::env::temp_dir().join("test_partial_config.yaml");
-    std::fs::write(&temp_file, yaml).unwrap();
+    let _guard = ENV_LOCK.lock().unwrap();
+    clear_env_vars();
+    unsafe { env::set_var("VOICEINPUT_DASHSCOPE_API_KEY", "partial-key"); }
+    unsafe { env::set_var("VOICEINPUT_MAX_RECORDING_SECONDS", "90"); }
 
-    let config = Config::from_yaml(temp_file.to_str().unwrap()).unwrap();
+    let config = Config::from_env().unwrap();
     assert_eq!(config.dashscope_api_key, "partial-key");
     assert_eq!(config.max_recording_seconds, 90);
     assert_eq!(config.audio_sample_rate, 16000);
     assert_eq!(config.audio_channels, 1);
+    assert_eq!(config.asr_strategy, AsrStrategy::DashscopeRealtime);
+}
 
-    std::fs::remove_file(temp_file).unwrap();
+#[test]
+fn test_dashscope_realtime_strategy_explicit() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    clear_env_vars();
+    unsafe { env::set_var("VOICEINPUT_DASHSCOPE_API_KEY", "test-key"); }
+    unsafe { env::set_var("VOICEINPUT_ASR_STRATEGY", "dashscope_realtime"); }
+
+    let config = Config::from_env().unwrap();
+    assert_eq!(config.asr_strategy, AsrStrategy::DashscopeRealtime);
 }

@@ -45,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
     let instance = parse_instance_arg();
     let fifo_path = format!("/tmp/amao_voice_ime_{}.fifo", instance);
 
-    let config = Config::from_yaml("conf.yaml")?;
+    let config = Config::from_env()?;
     let notifier = NotifyRustNotifier;
 
     setup_fifo(&fifo_path)?;
