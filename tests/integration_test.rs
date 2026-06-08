@@ -26,6 +26,7 @@ async fn process_asr_request(
 async fn test_full_flow_toggle_toggle_complete() {
     let mut audio = MockAudioCapture::new();
     audio.expect_start_capture().times(1).returning(|| Ok(()));
+    audio.expect_device_name().returning(|| None);
     audio.expect_stop_capture()
         .times(1)
         .returning(|| Ok(vec![1u8; 100]));
@@ -74,6 +75,7 @@ async fn test_full_flow_toggle_toggle_complete() {
 async fn test_transcription_failed() {
     let mut audio = MockAudioCapture::new();
     audio.expect_start_capture().times(1).returning(|| Ok(()));
+    audio.expect_device_name().returning(|| None);
     audio.expect_stop_capture()
         .times(1)
         .returning(|| Ok(vec![1u8; 100]));
@@ -119,6 +121,7 @@ async fn test_audio_start_failure() {
 async fn test_audio_stop_failure() {
     let mut audio = MockAudioCapture::new();
     audio.expect_start_capture().times(1).returning(|| Ok(()));
+    audio.expect_device_name().returning(|| None);
     audio.expect_stop_capture()
         .times(1)
         .returning(|| Err(anyhow::anyhow!("设备断开")));
@@ -140,6 +143,7 @@ async fn test_audio_stop_failure() {
 async fn test_empty_recognition_result() {
     let mut audio = MockAudioCapture::new();
     audio.expect_start_capture().times(1).returning(|| Ok(()));
+    audio.expect_device_name().returning(|| None);
     audio.expect_stop_capture()
         .times(1)
         .returning(|| Ok(vec![1u8; 100]));
