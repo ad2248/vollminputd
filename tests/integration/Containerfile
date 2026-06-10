@@ -2,15 +2,6 @@
 # 启动容器后，容器内 Python 脚本可任意调 makepkg / pacman / weston / pipewire / wl-copy
 FROM archlinux:latest
 
-# 代理 ENV 持久化到镜像层（build RUN + 容器运行时 cargo/pip/git 全部自动走）
-ENV HTTP_PROXY=http://100.64.0.5:7912 \
-    HTTPS_PROXY=http://100.64.0.5:7912 \
-    ALL_PROXY=http://100.64.0.5:7912 \
-    http_proxy=http://100.64.0.5:7912 \
-    https_proxy=http://100.64.0.5:7912 \
-    all_proxy=http://100.64.0.5:7912 \
-    no_proxy=127.0.0.1,localhost,::1
-
 # 走国内阿里源 + 关签名验证（签名单走独立 CDN，arch 镜像常超时）
 RUN echo 'Server = https://mirrors.tuna.tsinghua.edu.cn/archlinux/$repo/os/$arch' > /etc/pacman.d/mirrorlist && \
     sed -i 's/^SigLevel.*/SigLevel = Never/' /etc/pacman.conf
