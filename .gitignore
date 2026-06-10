@@ -1,3 +1,5 @@
 conf.yaml
 target
 .sisyphus
+**.pyc
+tests/integration/build-out

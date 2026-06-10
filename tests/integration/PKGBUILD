@@ -1,0 +1,59 @@
+# 集成测试专用 PKGBUILD —— 不修改仓库原 PKGBUILD
+# 源码由 host tarball 提供，顶层目录是 vollminputd/
+pkgname=vollminputd-git
+pkgver=0.0.0.test
+pkgrel=1
+pkgdesc="Vollminputd integration test build"
+arch=('x86_64')
+license=('Apache-2.0')
+depends=('wl-clipboard' 'openssl')
+makedepends=('rust' 'cargo' 'git' 'pipewire')
+
+source=("$srcdir/vollminputd.tar.gz")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$srcdir/vollminputd"
+    local v
+    v="$(git describe --tags --long 2>/dev/null | sed 's/^v//;s/-/./g')"
+    if [ -z "$v" ]; then
+        v="0.0.0.r$(git rev-list --count HEAD).g$(git rev-parse --short HEAD)"
+    fi
+    printf '%s' "$v"
+}
+
+build() {
+    cd "$srcdir/vollminputd"
+    export RUSTUP_TOOLCHAIN=stable
+    # CARGO_TARGET_DIR 用 builder 的 home（在容器 rootfs overlay upper，足够大）
+    # 不要放 /tmp（tmpfs 只 2G，装不下 rust+deps），不要 bind mount（overlay on bind 会挂）
+    export CARGO_TARGET_DIR=/home/builder/cargo-target
+    # link 阶段不挂代理（lld / linker 不需要外网，代理反而干扰）
+    unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+
+    # 先下载依赖（让 pipewire-sys 落到 registry），再 patch wrapper.h
+    cargo fetch --locked
+
+    # 修 pipewire-sys 0.10.0 在 pipewire 1.6.6 下的 bindgen 问题：
+    # wrapper.h 缺 #include <spa/debug/types.h>，导致 SPA_ID_INVALID 宏未生成
+    # 上游 issue: pipewire-rs/pipewire-sys#0.10.0 wrapper.h 不完整
+    local cargo_home wrapper
+    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    wrapper="$(find "$cargo_home/registry/src" -path "*/pipewire-sys-0.10.0/wrapper.h" 2>/dev/null | head -1)"
+    if [ -n "$wrapper" ] && [ -f "$wrapper" ]; then
+        if ! grep -q "spa/debug/types.h" "$wrapper"; then
+            echo "[PKGBUILD] patching pipewire-sys wrapper.h: $wrapper"
+            sed -i '1i #include <spa/debug/types.h>' "$wrapper"
+        fi
+    else
+        echo "[PKGBUILD] WARNING: pipewire-sys wrapper.h not found in $cargo_home/registry/src"
+    fi
+
+    cargo build --release
+}
+
+package() {
+    cd "$srcdir/vollminputd"
+    install -Dm755 "target/release/vollminputd" "$pkgdir/usr/bin/vollminputd"
+    install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

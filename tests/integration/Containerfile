@@ -1,0 +1,46 @@
+# vollminputd 集成测试镜像 —— 一个镜像装齐 build + test 全部依赖
+# 启动容器后，容器内 Python 脚本可任意调 makepkg / pacman / weston / pipewire / wl-copy
+FROM archlinux:latest
+
+# 代理 ENV 持久化到镜像层（build RUN + 容器运行时 cargo/pip/git 全部自动走）
+ENV HTTP_PROXY=http://100.64.0.5:7912 \
+    HTTPS_PROXY=http://100.64.0.5:7912 \
+    ALL_PROXY=http://100.64.0.5:7912 \
+    http_proxy=http://100.64.0.5:7912 \
+    https_proxy=http://100.64.0.5:7912 \
+    all_proxy=http://100.64.0.5:7912 \
+    no_proxy=127.0.0.1,localhost,::1
+
+# 走国内阿里源 + 关签名验证（签名单走独立 CDN，arch 镜像常超时）
+RUN echo 'Server = https://mirrors.tuna.tsinghua.edu.cn/archlinux/$repo/os/$arch' > /etc/pacman.d/mirrorlist && \
+    sed -i 's/^SigLevel.*/SigLevel = Never/' /etc/pacman.conf
+
+RUN pacman -Sy --noconfirm && \
+    pacman -S --noconfirm --needed \
+        base-devel git sudo pacman-contrib \
+        rust cargo clang \
+        pipewire pipewire-audio pipewire-pulse pipewire-alsa pipewire-jack \
+        wireplumber \
+        weston wl-clipboard alsa-lib alsa-utils \
+        python python-pytest \
+        socat \
+        openssl dbus libnotify \
+        xdg-utils
+
+# Cargo sparse registry + 国内镜像（清华 TUNA）
+# - sparse 协议避免 git index 在 slirp4netns 上拉死
+# - git-fetch-with-cli=true 绕开 cargo git2 HTTP/2 卡死 bug
+# - 国内镜像加速 crates.io 下载
+RUN mkdir -p /etc/cargo && \
+    printf '[net]\ngit-fetch-with-cli = true\n\n[source.crates-io]\nreplace-with = "mirror"\n\n[source.mirror]\nregistry = "sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"\n\n[registries.mirror]\nindex = "sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"\n' > /etc/cargo/config.toml
+
+# 普通用户（makepkg 拒绝 root）
+RUN useradd -m builder && \
+    echo "builder ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# 测试脚本挂载点
+WORKDIR /tests
+RUN mkdir -p /tests/scripts /build-out /run/secrets
+
+# 默认入口：什么都不做（实际由 host 编排脚本通过 podman run + 命令参数启动）
+CMD ["/bin/bash"]
