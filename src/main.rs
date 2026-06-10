@@ -1,10 +1,10 @@
-use VoiceInput::app::{SideEffect, VoiceInputApp};
-use VoiceInput::asr::create_asr_engine;
-use VoiceInput::audio::CpalAudioCapture;
-use VoiceInput::clipboard::WlCopyClipboard;
-use VoiceInput::config::Config;
-use VoiceInput::notifier::{Notifier, NotifyRustNotifier};
-use VoiceInput::state::{AppEvent, AppState};
+use vollminputd::app::{SideEffect, VollminputdApp};
+use vollminputd::asr::create_asr_engine;
+use vollminputd::audio::CpalAudioCapture;
+use vollminputd::clipboard::WlCopyClipboard;
+use vollminputd::config::Config;
+use vollminputd::notifier::{Notifier, NotifyRustNotifier};
+use vollminputd::state::{AppEvent, AppState};
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
@@ -34,7 +34,7 @@ fn parse_instance_arg() -> String {
             }
         }
     }
-    eprintln!("Usage: {} --instance <NAME>", env::args().next().unwrap_or_else(|| "voice-input".to_string()));
+    eprintln!("Usage: {} --instance <NAME>", env::args().next().unwrap_or_else(|| "vollminputd".to_string()));
     process::exit(1);
 }
 
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     println!("[INFO] 语音输入法守护进程启动");
 
     let instance = parse_instance_arg();
-    let fifo_path = format!("/tmp/amao_voice_ime_{}.fifo", instance);
+    let fifo_path = format!("/tmp/vollminputd_{}.fifo", instance);
 
     let config = Config::from_env()?;
     let notifier = NotifyRustNotifier;
@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
 
     let audio = CpalAudioCapture::new();
     let clipboard = WlCopyClipboard::new();
-    let mut app = VoiceInputApp::new(audio, clipboard);
+    let mut app = VollminputdApp::new(audio, clipboard);
 
     let (fifo_tx, mut fifo_rx) = mpsc::channel::<ImeCommand>(10);
 

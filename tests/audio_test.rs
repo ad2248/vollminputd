@@ -1,4 +1,4 @@
-use VoiceInput::audio::{AudioCapture, MockAudioCapture};
+use vollminputd::audio::{AudioCapture, MockAudioCapture};
 
 #[tokio::test]
 async fn test_mock_start_stop_lifecycle() {

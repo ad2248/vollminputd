@@ -1,4 +1,4 @@
-use VoiceInput::state::{transition, AppEvent, AppState};
+use vollminputd::state::{transition, AppEvent, AppState};
 
 #[test]
 fn test_asr_timeout_error_state() {

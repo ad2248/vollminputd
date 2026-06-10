@@ -3,7 +3,7 @@
 ## Test Patterns Discovered
 
 ### MockNotifier (mockall)
-- Created via `VoiceInput::notifier::MockNotifier::new()`
+- Created via `vollminputd::notifier::MockNotifier::new()`
 - `expect_notify()` with `.with(eq(...), eq(...), eq(...))` for arg matching
 - `.times(n)` to assert call count
 - `.returning(|_, _, _| Ok(()))` for closure return

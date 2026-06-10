@@ -1,4 +1,4 @@
-use VoiceInput::clipboard::{Clipboard, MockClipboard};
+use vollminputd::clipboard::{Clipboard, MockClipboard};
 
 #[test]
 fn test_mock_copy_text_success() {

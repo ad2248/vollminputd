@@ -1,9 +1,9 @@
-use VoiceInput::notifier::{Notifier, NotifyRustNotifier, TestNotifier};
+use vollminputd::notifier::{Notifier, NotifyRustNotifier, TestNotifier};
 use mockall::predicate::eq;
 
 #[test]
 fn test_mock_notifier_called_with_expected_args() {
-    let mut mock = VoiceInput::notifier::MockNotifier::new();
+    let mut mock = vollminputd::notifier::MockNotifier::new();
     mock.expect_notify()
         .with(eq("标题"), eq("内容"), eq(5))
         .times(1)
@@ -14,7 +14,7 @@ fn test_mock_notifier_called_with_expected_args() {
 
 #[test]
 fn test_mock_notifier_called_exactly_n_times() {
-    let mut mock = VoiceInput::notifier::MockNotifier::new();
+    let mut mock = vollminputd::notifier::MockNotifier::new();
     mock.expect_notify()
         .times(2)
         .returning(|_, _, _| Ok(()));

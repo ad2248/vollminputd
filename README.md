@@ -1,4 +1,4 @@
-# VoiceInput
+# vollminputd
 
 一个 Linux 语音输入法守护进程。通过快捷键触发录音，自动将语音转换为文字并写入剪贴板，支持在任意应用中粘贴使用。
 
@@ -25,15 +25,15 @@
 
 ```bash
 git clone <repository-url>
-cd VoiceInput
+cd vollminputd
 ```
 
 ### 2. 配置 API 密钥
 
-VoiceInput 使用环境变量进行配置。启动前必须设置 `VOICEINPUT_DASHSCOPE_API_KEY`：
+vollminputd 使用环境变量进行配置。启动前必须设置 `VOLLMINPUTD_DASHSCOPE_API_KEY`：
 
 ```bash
-export VOICEINPUT_DASHSCOPE_API_KEY="your-api-key"
+export VOLLMINPUTD_DASHSCOPE_API_KEY="your-api-key"
 ```
 
 > 获取 DashScope API 密钥：[阿里云 DashScope](https://dashscope.aliyun.com/)
@@ -49,7 +49,7 @@ cargo build --release
 确保已设置所需环境变量，然后启动守护进程：
 
 ```bash
-./target/release/VoiceInput --instance default
+./target/release/vollminputd --instance default
 ```
 
 ### 5. 触发录音
@@ -58,34 +58,34 @@ cargo build --release
 
 ```bash
 # 开始录音（第一次 TOGGLE）
-echo "TOGGLE" > /tmp/amao_voice_ime_default.fifo
+echo "TOGGLE" > /tmp/vollminputd_default.fifo
 
 # 停止录音（第二次 TOGGLE）
-echo "TOGGLE" > /tmp/amao_voice_ime_default.fifo
+echo "TOGGLE" > /tmp/vollminputd_default.fifo
 ```
 
 识别完成后，文字会自动写入剪贴板，你可以直接粘贴使用。
 
 ## 配置说明
 
-VoiceInput 通过环境变量进行配置：
+vollminputd 通过环境变量进行配置：
 
 | 环境变量 | 类型 | 默认值 | 说明 |
 |----------|------|--------|------|
-| `VOICEINPUT_DASHSCOPE_API_KEY` | string | - | **必填**，DashScope API 密钥 |
-| `VOICEINPUT_ASR_STRATEGY` | string | `"dashscope_realtime"` | ASR 策略：`dashscope_realtime`（实时）或 `omni_plus`（高质量） |
-| `VOICEINPUT_MAX_RECORDING_SECONDS` | integer | `60` | 最大录音时长（秒），超时自动停止 |
-| `VOICEINPUT_AUDIO_SAMPLE_RATE` | integer | `16000` | 音频采样率（Hz） |
-| `VOICEINPUT_AUDIO_CHANNELS` | integer | `1` | 音频通道数 |
+| `VOLLMINPUTD_DASHSCOPE_API_KEY` | string | - | **必填**，DashScope API 密钥 |
+| `VOLLMINPUTD_ASR_STRATEGY` | string | `"dashscope_realtime"` | ASR 策略：`dashscope_realtime`（实时）或 `omni_plus`（高质量） |
+| `VOLLMINPUTD_MAX_RECORDING_SECONDS` | integer | `60` | 最大录音时长（秒），超时自动停止 |
+| `VOLLMINPUTD_AUDIO_SAMPLE_RATE` | integer | `16000` | 音频采样率（Hz） |
+| `VOLLMINPUTD_AUDIO_CHANNELS` | integer | `1` | 音频通道数 |
 
 ### 配置示例
 
 ```bash
-export VOICEINPUT_DASHSCOPE_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-export VOICEINPUT_ASR_STRATEGY="dashscope_realtime"
-export VOICEINPUT_MAX_RECORDING_SECONDS="60"
-export VOICEINPUT_AUDIO_SAMPLE_RATE="16000"
-export VOICEINPUT_AUDIO_CHANNELS="1"
+export VOLLMINPUTD_DASHSCOPE_API_KEY="sk-xxx...xxxx"
+export VOLLMINPUTD_ASR_STRATEGY="dashscope_realtime"
+export VOLLMINPUTD_MAX_RECORDING_SECONDS="60"
+export VOLLMINPUTD_AUDIO_SAMPLE_RATE="16000"
+export VOLLMINPUTD_AUDIO_CHANNELS="1"
 ```
 
 ## ASR 策略对比
@@ -101,7 +101,7 @@ export VOICEINPUT_AUDIO_CHANNELS="1"
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        VoiceInput 守护进程                    │
+│                       vollminputd 守护进程                   │
 │  ┌─────────────┐    ┌──────────────┐    ┌────────────────┐  │
 │  │  FIFO 监听器 │───▶│   状态机      │───▶│  副作用执行器   │  │
 │  └─────────────┘    │ (Idle/       │    │ (音频/通知/    │  │
@@ -145,13 +145,13 @@ export VOICEINPUT_AUDIO_CHANNELS="1"
 ### Hyprland
 
 ```ini
-bind = , F12, exec, echo "TOGGLE" > /tmp/amao_voice_ime_default.fifo
+bind = , F12, exec, echo "TOGGLE" > /tmp/vollminputd_default.fifo
 ```
 
 ### Sway / i3
 
 ```
-bindsym F12 exec echo "TOGGLE" > /tmp/amao_voice_ime_default.fifo
+bindsym F12 exec echo "TOGGLE" > /tmp/vollminputd_default.fifo
 ```
 
 ### 命令行脚本
@@ -160,7 +160,7 @@ bindsym F12 exec echo "TOGGLE" > /tmp/amao_voice_ime_default.fifo
 #!/bin/bash
 # voice-toggle.sh
 INSTANCE="${VOICE_INSTANCE:-default}"
-echo "TOGGLE" > "/tmp/amao_voice_ime_${INSTANCE}.fifo"
+echo "TOGGLE" > "/tmp/vollminputd_${INSTANCE}.fifo"
 ```
 
 ## 开发
@@ -180,7 +180,7 @@ cargo test config
 ### 项目结构
 
 ```
-VoiceInput/
+vollminputd/
 ├── Cargo.toml              # 项目配置
 ├── src/
 │   ├── main.rs             # 守护进程入口
@@ -230,6 +230,7 @@ VoiceInput/
 本项目采用 [Apache License 2.0](LICENSE.txt) 许可证。
 
 ```
+
 Copyright 2026 i@kals.dev
 
 Licensed under the Apache License, Version 2.0 (the "License");

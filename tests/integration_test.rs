@@ -1,11 +1,11 @@
-use VoiceInput::app::{SideEffect, VoiceInputApp};
-use VoiceInput::asr::engine::{AsrEngine, MockAsrEngine};
-use VoiceInput::audio::MockAudioCapture;
-use VoiceInput::clipboard::MockClipboard;
-use VoiceInput::state::{AppEvent, AppState};
+use vollminputd::app::{SideEffect, VollminputdApp};
+use vollminputd::asr::engine::{AsrEngine, MockAsrEngine};
+use vollminputd::audio::MockAudioCapture;
+use vollminputd::clipboard::MockClipboard;
+use vollminputd::state::{AppEvent, AppState};
 
 async fn process_asr_request(
-    app: &mut VoiceInputApp<MockAudioCapture, MockClipboard>,
+    app: &mut VollminputdApp<MockAudioCapture, MockClipboard>,
     effects: &[SideEffect],
     asr: &MockAsrEngine,
 ) -> Vec<SideEffect> {
@@ -42,7 +42,7 @@ async fn test_full_flow_toggle_toggle_complete() {
         .times(1)
         .returning(|_| Ok(()));
 
-    let mut app = VoiceInputApp::new(audio, clipboard);
+    let mut app = VollminputdApp::new(audio, clipboard);
 
     // Idle → Recording
     let effects = app.handle_event(AppEvent::ToggleRecording).await;
@@ -86,7 +86,7 @@ async fn test_transcription_failed() {
         .returning(|_| Err(anyhow::anyhow!("网络超时")));
 
     let clipboard = MockClipboard::new();
-    let mut app = VoiceInputApp::new(audio, clipboard);
+    let mut app = VollminputdApp::new(audio, clipboard);
 
     app.handle_event(AppEvent::ToggleRecording).await;
     let effects = app.handle_event(AppEvent::ToggleRecording).await;
@@ -107,7 +107,7 @@ async fn test_audio_start_failure() {
         .returning(|| Err(anyhow::anyhow!("设备被占用")));
 
     let clipboard = MockClipboard::new();
-    let mut app = VoiceInputApp::new(audio, clipboard);
+    let mut app = VollminputdApp::new(audio, clipboard);
 
     let effects = app.handle_event(AppEvent::ToggleRecording).await;
     assert_eq!(app.state, AppState::Idle);
@@ -127,7 +127,7 @@ async fn test_audio_stop_failure() {
         .returning(|| Err(anyhow::anyhow!("设备断开")));
 
     let clipboard = MockClipboard::new();
-    let mut app = VoiceInputApp::new(audio, clipboard);
+    let mut app = VollminputdApp::new(audio, clipboard);
 
     app.handle_event(AppEvent::ToggleRecording).await;
     let effects = app.handle_event(AppEvent::ToggleRecording).await;
@@ -154,7 +154,7 @@ async fn test_empty_recognition_result() {
         .returning(|_| Ok("".to_string()));
 
     let clipboard = MockClipboard::new();
-    let mut app = VoiceInputApp::new(audio, clipboard);
+    let mut app = VollminputdApp::new(audio, clipboard);
 
     app.handle_event(AppEvent::ToggleRecording).await;
     let effects = app.handle_event(AppEvent::ToggleRecording).await;
@@ -169,7 +169,7 @@ async fn test_empty_recognition_result() {
 
 #[test]
 fn test_timeout_triggers_stop() {
-    use VoiceInput::state::transition;
+    use vollminputd::state::transition;
     let s = transition(AppState::Recording, AppEvent::ToggleRecording).unwrap();
     assert_eq!(s, AppState::Transcribing);
 }

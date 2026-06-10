@@ -11,7 +11,7 @@ pub enum SideEffect {
     CopyToClipboard(String),
 }
 
-pub struct VoiceInputApp<A: AudioCapture, C: Clipboard> {
+pub struct VollminputdApp<A: AudioCapture, C: Clipboard> {
     pub state: AppState,
     audio: A,
     clipboard: C,
@@ -19,7 +19,7 @@ pub struct VoiceInputApp<A: AudioCapture, C: Clipboard> {
     last_reported_seconds: Option<u64>,
 }
 
-impl<A: AudioCapture, C: Clipboard> VoiceInputApp<A, C> {
+impl<A: AudioCapture, C: Clipboard> VollminputdApp<A, C> {
     pub fn new(audio: A, clipboard: C) -> Self {
         Self {
             state: AppState::Idle,

@@ -1,4 +1,4 @@
-use VoiceInput::config::{AsrStrategy, Config};
+use vollminputd::config::{AsrStrategy, Config};
 use std::env;
 use std::sync::Mutex;
 
@@ -6,11 +6,11 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn clear_env_vars() {
     for key in [
-        "VOICEINPUT_DASHSCOPE_API_KEY",
-        "VOICEINPUT_ASR_STRATEGY",
-        "VOICEINPUT_MAX_RECORDING_SECONDS",
-        "VOICEINPUT_AUDIO_SAMPLE_RATE",
-        "VOICEINPUT_AUDIO_CHANNELS",
+        "VOLLMINPUTD_DASHSCOPE_API_KEY",
+        "VOLLMINPUTD_ASR_STRATEGY",
+        "VOLLMINPUTD_MAX_RECORDING_SECONDS",
+        "VOLLMINPUTD_AUDIO_SAMPLE_RATE",
+        "VOLLMINPUTD_AUDIO_CHANNELS",
     ] {
         unsafe { env::remove_var(key); }
     }
@@ -20,11 +20,11 @@ fn clear_env_vars() {
 fn test_load_full_config() {
     let _guard = ENV_LOCK.lock().unwrap();
     clear_env_vars();
-    unsafe { env::set_var("VOICEINPUT_DASHSCOPE_API_KEY", "test-key"); }
-    unsafe { env::set_var("VOICEINPUT_MAX_RECORDING_SECONDS", "120"); }
-    unsafe { env::set_var("VOICEINPUT_AUDIO_SAMPLE_RATE", "44100"); }
-    unsafe { env::set_var("VOICEINPUT_AUDIO_CHANNELS", "2"); }
-    unsafe { env::set_var("VOICEINPUT_ASR_STRATEGY", "omni_plus"); }
+    unsafe { env::set_var("VOLLMINPUTD_DASHSCOPE_API_KEY", "test-key"); }
+    unsafe { env::set_var("VOLLMINPUTD_MAX_RECORDING_SECONDS", "120"); }
+    unsafe { env::set_var("VOLLMINPUTD_AUDIO_SAMPLE_RATE", "44100"); }
+    unsafe { env::set_var("VOLLMINPUTD_AUDIO_CHANNELS", "2"); }
+    unsafe { env::set_var("VOLLMINPUTD_ASR_STRATEGY", "omni_plus"); }
 
     let config = Config::from_env().unwrap();
     assert_eq!(config.dashscope_api_key, "test-key");
@@ -38,7 +38,7 @@ fn test_load_full_config() {
 fn test_load_minimal_config() {
     let _guard = ENV_LOCK.lock().unwrap();
     clear_env_vars();
-    unsafe { env::set_var("VOICEINPUT_DASHSCOPE_API_KEY", "minimal-key"); }
+    unsafe { env::set_var("VOLLMINPUTD_DASHSCOPE_API_KEY", "minimal-key"); }
 
     let config = Config::from_env().unwrap();
     assert_eq!(config.dashscope_api_key, "minimal-key");
@@ -56,28 +56,28 @@ fn test_missing_api_key_returns_error() {
     let result = Config::from_env();
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("VOICEINPUT_DASHSCOPE_API_KEY"));
+    assert!(err_msg.contains("VOLLMINPUTD_DASHSCOPE_API_KEY"));
 }
 
 #[test]
 fn test_invalid_asr_strategy_returns_error() {
     let _guard = ENV_LOCK.lock().unwrap();
     clear_env_vars();
-    unsafe { env::set_var("VOICEINPUT_DASHSCOPE_API_KEY", "test-key"); }
-    unsafe { env::set_var("VOICEINPUT_ASR_STRATEGY", "invalid_strategy"); }
+    unsafe { env::set_var("VOLLMINPUTD_DASHSCOPE_API_KEY", "test-key"); }
+    unsafe { env::set_var("VOLLMINPUTD_ASR_STRATEGY", "invalid_strategy"); }
 
     let result = Config::from_env();
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("VOICEINPUT_ASR_STRATEGY"));
+    assert!(err_msg.contains("VOLLMINPUTD_ASR_STRATEGY"));
 }
 
 #[test]
 fn test_partial_config_with_defaults() {
     let _guard = ENV_LOCK.lock().unwrap();
     clear_env_vars();
-    unsafe { env::set_var("VOICEINPUT_DASHSCOPE_API_KEY", "partial-key"); }
-    unsafe { env::set_var("VOICEINPUT_MAX_RECORDING_SECONDS", "90"); }
+    unsafe { env::set_var("VOLLMINPUTD_DASHSCOPE_API_KEY", "partial-key"); }
+    unsafe { env::set_var("VOLLMINPUTD_MAX_RECORDING_SECONDS", "90"); }
 
     let config = Config::from_env().unwrap();
     assert_eq!(config.dashscope_api_key, "partial-key");
@@ -91,8 +91,8 @@ fn test_partial_config_with_defaults() {
 fn test_dashscope_realtime_strategy_explicit() {
     let _guard = ENV_LOCK.lock().unwrap();
     clear_env_vars();
-    unsafe { env::set_var("VOICEINPUT_DASHSCOPE_API_KEY", "test-key"); }
-    unsafe { env::set_var("VOICEINPUT_ASR_STRATEGY", "dashscope_realtime"); }
+    unsafe { env::set_var("VOLLMINPUTD_DASHSCOPE_API_KEY", "test-key"); }
+    unsafe { env::set_var("VOLLMINPUTD_ASR_STRATEGY", "dashscope_realtime"); }
 
     let config = Config::from_env().unwrap();
     assert_eq!(config.asr_strategy, AsrStrategy::DashscopeRealtime);

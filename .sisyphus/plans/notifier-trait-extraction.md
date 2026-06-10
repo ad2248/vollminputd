@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-> 将现有的 `notification.rs` 中的直接函数调用重构为 `Notifier` Trait，实现生产环境 `NotifyRustNotifier`（包装 notify-rust）和测试环境 `MockNotifier`（mockall 自动生成）+ `TestNotifier`（channel 收集）。保持 `VoiceInputApp` 纯业务逻辑不变，`SideEffect::Notify` 继续作为命令返回，执行层通过 Trait 解耦。
+> 将现有的 `notification.rs` 中的直接函数调用重构为 `Notifier` Trait，实现生产环境 `NotifyRustNotifier`（包装 notify-rust）和测试环境 `MockNotifier`（mockall 自动生成）+ `TestNotifier`（channel 收集）。保持 `VollminputdApp` 纯业务逻辑不变，`SideEffect::Notify` 继续作为命令返回，执行层通过 Trait 解耦。
 >
 > **Deliverables**:
 > - `src/notifier/mod.rs` — Notifier trait + NotifyRustNotifier 实现
@@ -31,7 +31,7 @@
 ### Research Findings
 - 项目已具备成熟的六边形架构基础：AudioCapture、AsrEngine、Clipboard 均已 Trait 化 + automock
 - 通知当前是纯函数 `notify()` 在 `notification.rs`，直接调用 notify-rust
-- `VoiceInputApp` 生成 `SideEffect::Notify`，`main.rs` 的 `execute_effect()` 执行实际通知
+- `VollminputdApp` 生成 `SideEffect::Notify`，`main.rs` 的 `execute_effect()` 执行实际通知
 - 9 个测试文件、52+ 测试用例全部通过
 
 ### Metis Review
@@ -69,7 +69,7 @@
 - 不添加新依赖
 
 ### Must NOT Have (Guardrails)
-- 不修改 VoiceInputApp 泛型参数（保持 `<A, C>` 不加入 Notifier）
+- 不修改 VollminputdApp 泛型参数（保持 `<A, C>` 不加入 Notifier）
 - 不修改 SideEffect::Notify 结构或任何生成它的代码
 - 不新增 Socket、E2E 测试、proptest、Docker 相关内容
 - 不改动 ASR、AudioCapture、Clipboard 模块
@@ -264,8 +264,8 @@ Parallel Speedup: Wave 1 (3x), Wave 2 (2x), Final (3x)
 - [x] 4. **更新 `src/main.rs` — execute_effect 接收 `&dyn Notifier`**
 
   **What to do**:
-  1. 移除 `use VoiceInput::notification::notify;` import
-  2. 添加 `use VoiceInput::notifier::{Notifier, NotifyRustNotifier};`
+  1. 移除 `use vollminputd::notification::notify;` import
+  2. 添加 `use vollminputd::notifier::{Notifier, NotifyRustNotifier};`
   3. 在 `main()` 中创建 `let notifier = NotifyRustNotifier;`
   4. 修改 `execute_effect(effect: &SideEffect)` → `execute_effect(effect: &SideEffect, notifier: &dyn Notifier)`
   5. 在 `SideEffect::Notify` 分支中，将 `notify(title, body, *timeout_secs)` 替换为 `let _ = notifier.notify(title, body, *timeout_secs);`
@@ -290,7 +290,7 @@ Parallel Speedup: Wave 1 (3x), Wave 2 (2x), Final (3x)
   - **Blocked By**: T1, T2, T3 (notifier 模块必须存在)
 
   **References**:
-  - `src/main.rs:6` — 现有 `use VoiceInput::notification::notify;` import
+  - `src/main.rs:6` — 现有 `use vollminputd::notification::notify;` import
   - `src/main.rs:129-146` — `execute_effect()` 函数
   - `src/main.rs:148-183` — `execute_effect_with_asr()` 函数
   - `src/main.rs:118-124` — effect 处理循环
@@ -306,7 +306,7 @@ Parallel Speedup: Wave 1 (3x), Wave 2 (2x), Final (3x)
   - [ ] `grep "notification::notify" src/main.rs` → not found
   - [ ] `grep "execute_effect(effect: &SideEffect, notifier: &dyn Notifier)" src/main.rs` → found (or equivalent signature)
   - [ ] `grep "notifier.notify" src/main.rs` → found
-  - [ ] `cargo build --bin VoiceInput` → 0 errors
+  - [ ] `cargo build --bin vollminputd` → 0 errors
 
   **QA Scenarios**:
   ```
@@ -314,7 +314,7 @@ Parallel Speedup: Wave 1 (3x), Wave 2 (2x), Final (3x)
     Tool: Bash
     Preconditions: Wave 1 完成
     Steps:
-      1. cargo build --bin VoiceInput 2>&1 | tee build.log
+      1. cargo build --bin vollminputd 2>&1 | tee build.log
       2. grep -c "error" build.log
     Expected Result: 0 errors
     Failure Indicators: 编译错误、trait bound 不匹配、找不到模块

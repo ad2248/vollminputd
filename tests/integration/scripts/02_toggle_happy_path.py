@@ -26,7 +26,7 @@ AUDIO = Path("/tests/repo-tests/test_audio.wav")
 PKG_NAME = "vollminputd-git"
 
 INSTANCE = os.environ.get("TEST_INSTANCE", f"pytest-{uuid.uuid4().hex[:8]}")
-FIFO_PATH = Path(f"/tmp/amao_voice_ime_{INSTANCE}.fifo")
+FIFO_PATH = Path(f"/tmp/vollminputd_{INSTANCE}.fifo")
 DAEMON_LOG = Path("/tmp/daemon.log")
 WESTON_SOCKET = f"wayland-test-{INSTANCE}"
 
@@ -171,7 +171,7 @@ def main() -> int:
 
         log("=== STEP 4: 起 vollminputd ===")
         api_key = KEY_FILE.read_text().strip()
-        os.environ["VOICEINPUT_DASHSCOPE_API_KEY"] = api_key
+        os.environ["VOLLMINPUTD_DASHSCOPE_API_KEY"] = api_key
         DAEMON_LOG.write_text("")
         with DAEMON_LOG.open("w") as f:
             procs.append(subprocess.Popen(
