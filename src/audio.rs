@@ -24,9 +24,16 @@ pub struct CpalAudioCapture {
 impl CpalAudioCapture {
     pub fn new() -> Self {
         let host = cpal::default_host();
+        // cpal 0.18: device.name() 被 device.description() / device.id() 替代
+        // DeviceId 不再有 name()，但实现了 Display，直接 format 即可
         let device_name = host
             .default_input_device()
-            .and_then(|d| d.name().ok());
+            .and_then(|d| {
+                d.description()
+                    .ok()
+                    .map(|desc| desc.name().to_string())
+                    .or_else(|| d.id().ok().map(|id| id.to_string()))
+            });
 
         Self {
             buffer: Arc::new(Mutex::new(Vec::new())),
@@ -46,7 +53,13 @@ impl AudioCapture for CpalAudioCapture {
             .default_input_device()
             .ok_or_else(|| anyhow::anyhow!("No input device available"))?;
 
-        let device_name = device.name().ok();
+        // cpal 0.18: device.name() 被 device.description() / device.id() 替代
+        // DeviceId 实现了 Display（不再是 name()），直接 format
+        let device_name = device
+            .description()
+            .ok()
+            .map(|desc| desc.name().to_string())
+            .or_else(|| device.id().ok().map(|id| id.to_string()));
         println!("[INFO] 使用音频输入设备: {}", device_name.as_deref().unwrap_or("Unknown"));
         self.device_name = device_name;
 
@@ -59,8 +72,9 @@ impl AudioCapture for CpalAudioCapture {
         let buffer = Arc::clone(&self.buffer);
         let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
 
+        // cpal 0.18: build_*_stream 现在收 StreamConfig by value（StreamConfig: Copy）
         let stream = device.build_input_stream(
-            &config,
+            config,
             move |data: &[i16], _: &cpal::InputCallbackInfo| {
                 let mut buf = buffer.lock().unwrap();
                 for &sample in data {
