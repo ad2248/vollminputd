@@ -7,10 +7,8 @@ Pytest 配置 + session-scope fixture。
 - 每个测试函数起独立 --rm 容器
 """
 import os
-import shutil
 import subprocess
 import sys
-import tarfile
 import time
 import uuid
 from pathlib import Path
@@ -71,27 +69,18 @@ def _image_exists(name: str) -> bool:
 
 @pytest.fixture(scope="session")
 def src_tarball() -> Path:
-    """把 host 仓库存成 tarball，挂在容器内 /src.tar.gz。"""
+    """用 git archive 打包源码，挂在容器内 /src.tar.gz。"""
     BUILD_OUT.mkdir(parents=True, exist_ok=True)
     tarball = BUILD_OUT / "src.tar.gz"
     if tarball.exists() and (time.time() - tarball.stat().st_mtime < 60):
         log(f"源码 tarball 已存在: {tarball.name}")
         return tarball
     log(f"打包源码: {tarball.name} ...")
-    skip_dirs = {"target", "tests/integration/build-out"}
-    with tarfile.open(tarball, "w:gz") as tf:
-        for root, dirs, files in os.walk(REPO_ROOT):
-            root_path = Path(root)
-            rel_root = root_path.relative_to(REPO_ROOT)
-            dirs[:] = [
-                d for d in dirs
-                if str(rel_root / d) not in skip_dirs and d not in skip_dirs
-            ]
-            for f in files:
-                p = root_path / f
-                rel = p.relative_to(REPO_ROOT)
-                arcname = str(Path("vollminputd") / rel)
-                tf.add(p, arcname=arcname)
+    subprocess.run(
+        ["git", "archive", "--prefix=vollminputd/", "-o", str(tarball), "HEAD"],
+        cwd=REPO_ROOT,
+        check=True,
+    )
     log(f"tarball 大小: {tarball.stat().st_size} bytes")
     return tarball
 

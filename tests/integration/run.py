@@ -7,10 +7,8 @@ host 编排脚本：逐个拉起容器、每个容器跑一个 Python 测试脚�
     python3 run.py scripts/01_build_package.py  # 只跑某个测试
 """
 import os
-import shutil
 import subprocess
 import sys
-import tarfile
 import time
 from pathlib import Path
 
@@ -60,29 +58,19 @@ def _image_exists(name: str) -> bool:
 
 
 def pack_source_tarball() -> Path:
-    """把 host 仓库存成 tarball，挂在容器内 /src.tar.gz。
-    顶层是 vollminputd/（makepkg 期望）。
-    必须含 .git（pkgver() 调 git describe）。"""
+    """用 git archive 打包源码，挂在容器内 /src.tar.gz。
+    顶层是 vollminputd/（makepkg 期望）。"""
     BUILD_OUT.mkdir(parents=True, exist_ok=True)
     tarball = BUILD_OUT / "src.tar.gz"
     if tarball.exists() and (time.time() - tarball.stat().st_mtime < 60):
         log(f"源码 tarball 已存在: {tarball.name}")
         return tarball
     log(f"打包源码: {tarball.name} ...")
-    # 先跳过大目录再 walk，避免 rglob 遍历 target/ 等成千上万文件
-    # .git 必须保留完整（pkgver() 需要 git describe）
-    skip_dirs = {"target", "tests/integration/build-out"}
-    with tarfile.open(tarball, "w:gz") as tf:
-        for root, dirs, files in os.walk(REPO_ROOT):
-            root_path = Path(root)
-            rel_root = root_path.relative_to(REPO_ROOT)
-            # 原地修改 dirs 跳过子目录（os.walk 特性）
-            dirs[:] = [d for d in dirs if str(rel_root / d) not in skip_dirs and d not in skip_dirs]
-            for f in files:
-                p = root_path / f
-                rel = p.relative_to(REPO_ROOT)
-                arcname = str(Path("vollminputd") / rel)
-                tf.add(p, arcname=arcname)
+    subprocess.run(
+        ["git", "archive", "--prefix=vollminputd/", "-o", str(tarball), "HEAD"],
+        cwd=REPO_ROOT,
+        check=True,
+    )
     log(f"tarball 大小: {tarball.stat().st_size} bytes")
     return tarball
 

@@ -13,13 +13,8 @@ source=("$srcdir/vollminputd.tar.gz")
 sha256sums=('SKIP')
 
 pkgver() {
-    cd "$srcdir/vollminputd"
-    local v
-    v="$(git describe --tags --long 2>/dev/null | sed 's/^v//;s/-/./g')"
-    if [ -z "$v" ]; then
-        v="0.0.0.r$(git rev-list --count HEAD).g$(git rev-parse --short HEAD)"
-    fi
-    printf '%s' "$v"
+    # 集成测试用静态版本号，不依赖 .git/
+    printf '%s' "0.0.0.test"
 }
 
 build() {
