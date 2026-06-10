@@ -12,25 +12,20 @@ ENV HTTP_PROXY=http://100.64.0.5:7912 \
     no_proxy=127.0.0.1,localhost,::1
 
 # 走国内阿里源 + 关签名验证（签名单走独立 CDN，arch 镜像常超时）
-RUN echo 'Server = https://mirrors.aliyun.com/archlinux/$repo/os/$arch' > /etc/pacman.d/mirrorlist && \
+RUN echo 'Server = https://mirrors.tuna.tsinghua.edu.cn/archlinux/$repo/os/$arch' > /etc/pacman.d/mirrorlist && \
     sed -i 's/^SigLevel.*/SigLevel = Never/' /etc/pacman.conf
 
-# 姐姐 2026-06-09 铁律：用最新默认依赖，不钉任何版本
-# 一次性装齐所有包，让 pacman 自动解决依赖
-RUN for i in 1 2 3 4 5; do \
-        pacman -Sy --noconfirm && \
-        pacman -S --noconfirm --needed \
-            base-devel git sudo pacman-contrib \
-            rust cargo clang \
-            pipewire pipewire-audio pipewire-pulse pipewire-alsa pipewire-jack \
-            wireplumber \
-            weston wl-clipboard alsa-lib alsa-utils \
-            python python-pytest \
-            socat \
-            openssl dbus libnotify \
-            xdg-utils && break; \
-        echo "=== pacman retry $i ==="; sleep 5; \
-    done
+RUN pacman -Sy --noconfirm && \
+    pacman -S --noconfirm --needed \
+        base-devel git sudo pacman-contrib \
+        rust cargo clang \
+        pipewire pipewire-audio pipewire-pulse pipewire-alsa pipewire-jack \
+        wireplumber \
+        weston wl-clipboard alsa-lib alsa-utils \
+        python python-pytest \
+        socat \
+        openssl dbus libnotify \
+        xdg-utils
 
 # Cargo sparse registry + 国内镜像（清华 TUNA）
 # - sparse 协议避免 git index 在 slirp4netns 上拉死

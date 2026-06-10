@@ -14,6 +14,33 @@ OUTPUT_DIR = Path("/build-out")
 SRC_TARBALL = Path("/src.tar.gz")
 PKGBUILD_PATH = OUTPUT_DIR / "PKGBUILD"
 
+# 姐姐需要的 Cargo 镜像配置内容
+config_content = """[source.crates-io]
+replace-with = 'rsproxy-sparse'
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[registries.rsproxy]
+index = "https://rsproxy.cn/crates.io-index"
+
+[net]
+git-fetch-with-cli = true
+"""
+
+def write_cargo_config():
+    # 获取 ~/.cargo 目录和 config.toml 文件的绝对路径
+    cargo_dir = Path.home() / ".cargo"
+    config_file = cargo_dir / "config.toml"
+
+    # 确保 ~/.cargo 目录存在 (相当于 mkdir -p)
+    cargo_dir.mkdir(parents=True, exist_ok=True)
+
+    # 将配置内容写入文件 (会覆盖已有内容喵)
+    config_file.write_text(config_content, encoding="utf-8")
+    
+    print(f"喵！配置已经成功写入到：{config_file}")
+
 
 def log(msg):
     print(f"[01_build_package] {msg}", flush=True)
@@ -25,6 +52,8 @@ def run(cmd, **kw):
 
 
 def main() -> int:
+    write_cargo_config()
+    
     if not SRC_TARBALL.exists():
         log(f"!! 找不到 {SRC_TARBALL}")
         return 1
