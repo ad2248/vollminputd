@@ -1,6 +1,8 @@
 """Mocked harness tests for conftest internals: load_key, src_tarball, run_container.
 Every subprocess is faked (no podman/git/network); not live; never reads real .env.test.
 """
+import hashlib
+import json
 import subprocess
 import tarfile
 from pathlib import Path
@@ -127,6 +129,18 @@ def test_src_tarball_rebuilt_per_output_dir(tmp_path, monkeypatch):
     assert tarfile.open(second).getnames() == ['vollminputd/src/brand_new.rs']
 
 
+def test_src_tarball_reused_in_same_output_dir(tmp_path, monkeypatch):
+    output = tmp_path / 'out'
+    source = output / 'source' / 'vollminputd'
+    source.mkdir(parents=True)
+    tarball = output / 'source.tar.gz'
+    tarball.write_bytes(b'snapshot')
+    (output / 'source.ready').touch()
+    monkeypatch.setattr(conftest.subprocess, 'check_output',
+                        lambda *args, **kwargs: pytest.fail('snapshot was rebuilt'))
+    assert conftest.src_tarball.__wrapped__(_fake_request(output)) == tarball
+
+
 def test_src_tarball_excludes_custom_key_file(tmp_path, monkeypatch):
     repo = _build_repo(tmp_path)
     key_file = repo / 'tests' / 'local.key'
@@ -136,6 +150,31 @@ def test_src_tarball_excludes_custom_key_file(tmp_path, monkeypatch):
     request.config._voiceinput_key_file = key_file.resolve()
     with tarfile.open(conftest.src_tarball.__wrapped__(request)) as archive:
         assert archive.getnames() == ['vollminputd/Cargo.toml']
+
+
+# ----------------------------------------------------------- reusable package
+def test_built_package_reused_when_manifest_matches(tmp_path, monkeypatch):
+    output = tmp_path / 'out'
+    packages = output / 'packages'
+    packages.mkdir(parents=True)
+    tarball = output / 'source.tar.gz'
+    tarball.write_bytes(b'source')
+    package = packages / 'vollminputd-git-test.pkg.tar.zst'
+    package.write_bytes(b'package')
+    image_id = 'sha256:image'
+    manifest = {
+        'head': 'abc123',
+        'source_sha256': hashlib.sha256(tarball.read_bytes()).hexdigest(),
+        'image_id': image_id,
+        'package_sha256': hashlib.sha256(package.read_bytes()).hexdigest(),
+    }
+    (output / 'manifest.json').write_text(json.dumps(manifest))
+    monkeypatch.setattr(conftest.subprocess, 'check_output',
+                        lambda *args, **kwargs: 'abc123\n')
+    monkeypatch.setattr(conftest, 'run_container',
+                        lambda *args, **kwargs: pytest.fail('package was rebuilt'))
+    assert conftest.built_package.__wrapped__(
+        _fake_request(output), image_id, tarball) == package
 
 
 # ------------------------------------------------------------- run_container

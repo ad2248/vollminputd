@@ -1,10 +1,15 @@
 """
-测试用例 01：验证 makepkg 能成功构建 .pkg.tar.zst。
+测试用例 01：验证测试镜像与 makepkg 产物。
 
-实际构建在 conftest.py 的 session-scope fixture `built_package` 里完成，
-这里只是断言产物存在且非空。
+实际构建在 conftest.py 的 session-scope fixtures 里完成，
+这里只断言镜像 ID 与软件包产物有效。
 """
 from pathlib import Path
+
+
+def test_image_ready(test_image: str):
+    """测试镜像必须由 podman 成功构建并返回内容 ID。"""
+    assert test_image
 
 
 def test_package_exists(built_package: Path):
