@@ -8,6 +8,8 @@ url="https://github.com/ad2248/vollminputd"
 license=('Apache-2.0')
 depends=('wl-clipboard' 'openssl')
 makedepends=('rust' 'cargo' 'git' 'pipewire')
+# GCC LTO objects in libspa's C shims cannot be linked by Rust's lld.
+options=('!lto')
 source=("vollminputd::git+https://github.com/ad2248/vollminputd.git")
 sha256sums=('SKIP')
 
@@ -20,7 +22,12 @@ build() {
     cd "${srcdir}/vollminputd"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
-    cargo build --frozen --release
+    cargo build --locked --release
+}
+
+check() {
+    cd "${srcdir}/vollminputd"
+    cargo test --locked
 }
 
 package() {

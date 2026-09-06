@@ -1,25 +1,18 @@
 use anyhow::{Context, Result};
 use std::env;
 
+use crate::asr::{DEFAULT_ASR_ENDPOINT, DEFAULT_ASR_MODEL};
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub dashscope_api_key: String,
     pub max_recording_seconds: u64,
     pub audio_sample_rate: u32,
     pub audio_channels: u16,
-    pub asr_strategy: AsrStrategy,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum AsrStrategy {
-    DashscopeRealtime,
-    OmniPlus,
-}
-
-impl Default for AsrStrategy {
-    fn default() -> Self {
-        AsrStrategy::DashscopeRealtime
-    }
+    /// ASR 服务完整端点 URL
+    pub asr_endpoint: String,
+    /// ASR 模型名称
+    pub asr_model: String,
 }
 
 impl Config {
@@ -27,17 +20,6 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         let dashscope_api_key = env::var("VOLLMINPUTD_DASHSCOPE_API_KEY")
             .context("环境变量 VOLLMINPUTD_DASHSCOPE_API_KEY 未设置")?;
-
-        let asr_strategy = match env::var("VOLLMINPUTD_ASR_STRATEGY").ok().as_deref() {
-            Some("omni_plus") => AsrStrategy::OmniPlus,
-            Some("dashscope_realtime") | None => AsrStrategy::DashscopeRealtime,
-            Some(other) => {
-                return Err(anyhow::anyhow!(
-                    "无效的环境变量 VOLLMINPUTD_ASR_STRATEGY: {}。可选值: dashscope_realtime, omni_plus",
-                    other
-                ));
-            }
-        };
 
         let max_recording_seconds = env::var("VOLLMINPUTD_MAX_RECORDING_SECONDS")
             .ok()
@@ -54,12 +36,25 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1);
 
+        let asr_endpoint = env::var("VOLLMINPUTD_ASR_ENDPOINT")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| DEFAULT_ASR_ENDPOINT.to_string());
+
+        let asr_model = env::var("VOLLMINPUTD_ASR_MODEL")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| DEFAULT_ASR_MODEL.to_string());
+
         Ok(Config {
             dashscope_api_key,
             max_recording_seconds,
             audio_sample_rate,
             audio_channels,
-            asr_strategy,
+            asr_endpoint,
+            asr_model,
         })
     }
 }

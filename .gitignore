@@ -3,3 +3,4 @@ target
 .sisyphus
 **.pyc
 tests/integration/build-out
+.pytest_cache/
