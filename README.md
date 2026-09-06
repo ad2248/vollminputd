@@ -4,7 +4,7 @@
 
 ## 功能特性
 
-- **双 ASR 策略**：支持 DashScope 实时语音识别（速度快）和 OmniPlus 模型（识别质量好，支持润色）
+- **原生 HTTP 语音识别**：单一后端/模型 `qwen-audio-3.0-asr-flash`，走原生 HTTP 服务
 - **系统级集成**：通过 FIFO 命名管道接收快捷键触发，可作为守护进程常驻后台
 - **实时反馈**：录音过程中显示桌面通知，包括录音时长、设备信息
 - **自动超时保护**：可配置最大录音时长，防止忘记停止录音
@@ -73,29 +73,26 @@ vollminputd 通过环境变量进行配置：
 | 环境变量 | 类型 | 默认值 | 说明 |
 |----------|------|--------|------|
 | `VOLLMINPUTD_DASHSCOPE_API_KEY` | string | - | **必填**，DashScope API 密钥 |
-| `VOLLMINPUTD_ASR_STRATEGY` | string | `"dashscope_realtime"` | ASR 策略：`dashscope_realtime`（实时）或 `omni_plus`（高质量） |
+| `VOLLMINPUTD_ASR_ENDPOINT` | string | `https://llm-y3exskfcgxgxzn23.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation` | 可选，ASR 原生 HTTP 端点；API key 会发往该端点，仅对可信端点使用 |
+| `VOLLMINPUTD_ASR_MODEL` | string | `qwen-audio-3.0-asr-flash` | 可选，ASR 模型名 |
 | `VOLLMINPUTD_MAX_RECORDING_SECONDS` | integer | `60` | 最大录音时长（秒），超时自动停止 |
 | `VOLLMINPUTD_AUDIO_SAMPLE_RATE` | integer | `16000` | 音频采样率（Hz） |
 | `VOLLMINPUTD_AUDIO_CHANNELS` | integer | `1` | 音频通道数 |
+
+> 准确性说明：当前实际录音固定为 16 kHz、16 bit、单声道（实现内硬编码），`VOLLMINPUTD_AUDIO_SAMPLE_RATE` / `VOLLMINPUTD_AUDIO_CHANNELS` 不会改变采集参数。
 
 ### 配置示例
 
 ```bash
 export VOLLMINPUTD_DASHSCOPE_API_KEY="sk-xxx...xxxx"
-export VOLLMINPUTD_ASR_STRATEGY="dashscope_realtime"
 export VOLLMINPUTD_MAX_RECORDING_SECONDS="60"
 export VOLLMINPUTD_AUDIO_SAMPLE_RATE="16000"
 export VOLLMINPUTD_AUDIO_CHANNELS="1"
 ```
 
-## ASR 策略对比
+## ASR 接口
 
-| 特性 | `dashscope_realtime` | `omni_plus` |
-|------|----------------------|-------------|
-| 速度 | 快（流式 WebSocket） | 较慢（HTTP 请求） |
-| 识别质量 | 良好 | 优秀 |
-| 文本润色 | 不支持 | 支持 |
-| 适用场景 | 快速输入、实时性要求高 | 对识别准确度要求高 |
+调用 `VOLLMINPUTD_ASR_ENDPOINT` 的原生 HTTP 服务，请求体为 `input.messages` + `parameters`（`formatwav`，采样率 16000），音频以 `audio/wav;base64` 内嵌；从应答的 `text` 或 `output.text` 取识别文本。
 
 ## 架构设计
 
@@ -116,12 +113,11 @@ export VOLLMINPUTD_AUDIO_CHANNELS="1"
 │  │  (16kHz PCM)    │ │  rust   │ │   (Wayland)      │       │
 │  └─────────────────┘ └─────────┘ └──────────────────┘       │
 │                            │                                 │
-│                     ┌──────┴──────┐                          │
-│                     ▼             ▼                          │
-│        ┌─────────────────┐ ┌─────────────────┐               │
-│        │ DashScope 实时  │ │   OmniPlus      │               │
-│        │   (WebSocket)   │ │   (HTTP API)    │               │
-│        └─────────────────┘ └─────────────────┘               │
+│                            ▼                                 │
+│              ┌───────────────────────────┐                    │
+│              │  原生 HTTP ASR 服务        │                   │
+│              │ (qwen-audio-3.0-asr-flash)│                    │
+│              └───────────────────────────┘                    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -133,7 +129,7 @@ export VOLLMINPUTD_AUDIO_CHANNELS="1"
 | `app.rs` | 应用核心，状态机驱动的事件处理，录音超时轮询 |
 | `state.rs` | 纯函数状态转换：`Idle ⟷ Recording ⟷ Transcribing` |
 | `audio.rs` | 基于 `cpal` 的音频采集，PCM 转 WAV |
-| `asr/` | ASR 引擎抽象及两种实现（实时 / OmniPlus） |
+| `asr/` | ASR 引擎抽象及原生 HTTP 实现（`native.rs`） |
 | `clipboard.rs` | Wayland 剪贴板操作（`wl-copy`） |
 | `notifier/` | 桌面通知抽象及 `notify-rust` 实现 |
 | `config.rs` | 环境变量配置解析 |
@@ -167,6 +163,8 @@ echo "TOGGLE" > "/tmp/vollminputd_${INSTANCE}.fifo"
 
 ### 运行测试
 
+单元测试（host 直接跑）：
+
 ```bash
 # 运行所有测试
 cargo test
@@ -176,6 +174,20 @@ cargo test audio
 cargo test asr
 cargo test config
 ```
+
+集成测试（podman 容器端到端：构建 + `cargo test --locked` + makepkg 打包在同一容器完成，每个场景独立全新容器跑 headless PipeWire/Sway 语音链路）：
+
+```bash
+# 离线套件（默认，不需要 API key；live 用例默认排除）
+python3 tests/integration/run.py
+
+# 真打云端原生 HTTP 服务；缺 key 会失败而不是跳过
+python3 tests/integration/run.py --live
+```
+
+host 前置条件、API key 配置、CI 部署步骤与覆盖边界见 [tests/integration/README.md](tests/integration/README.md)。
+
+CI（`.gitea/workflows/tests.yml`）在 push main、同仓库 PR、手动与每日定时触发：配置了 `VOLLMINPUTD_DASHSCOPE_API_KEY` secret 时自动加跑 live 用例，否则只跑离线套件并在日志中注明 live 已禁用；本次运行的产物（日志、清单、JUnit）无论成败都会上传。
 
 ### 项目结构
 
@@ -192,9 +204,7 @@ vollminputd/
 │   ├── config.rs           # 配置解析
 │   ├── asr/                # ASR 引擎
 │   │   ├── engine.rs       # Trait 定义
-│   │   ├── factory.rs      # 工厂函数
-│   │   ├── realtime.rs     # DashScope 实时识别
-│   │   └── omni_plus.rs    # OmniPlus 模型
+│   │   └── native.rs       # 原生 HTTP 识别
 │   └── notifier/           # 通知系统
 │       └── mod.rs
 └── tests/                  # 集成测试
@@ -212,7 +222,6 @@ vollminputd/
 | `tokio` | 异步运行时 |
 | `cpal` | 跨平台音频采集 |
 | `reqwest` | HTTP/HTTPS 客户端 |
-| `tokio-tungstenite` | WebSocket 客户端（实时 ASR） |
 | `notify-rust` | Linux 桌面通知（D-Bus） |
 | `serde` | 数据序列化/反序列化 |
 | `anyhow` | 错误处理 |

@@ -167,9 +167,63 @@ async fn test_empty_recognition_result() {
     )));
 }
 
-#[test]
-fn test_timeout_triggers_stop() {
-    use vollminputd::state::transition;
-    let s = transition(AppState::Recording, AppEvent::ToggleRecording).unwrap();
-    assert_eq!(s, AppState::Transcribing);
+#[tokio::test]
+async fn test_poll_recording_max_seconds_zero_triggers_timeout() {
+    let mut audio = MockAudioCapture::new();
+    audio.expect_start_capture().times(1).returning(|| Ok(()));
+    audio.expect_device_name().times(2).returning(|| None);
+    audio.expect_stop_capture()
+        .times(1)
+        .returning(|| Ok(vec![1u8; 100]));
+
+    let clipboard = MockClipboard::new();
+    let mut app = VollminputdApp::new(audio, clipboard);
+
+    // Idle → Recording
+    app.handle_event(AppEvent::ToggleRecording).await;
+    assert_eq!(app.state, AppState::Recording);
+
+    // max_seconds=0：任何已录时长都应立即超时
+    let (effects, timeout) = app.poll_recording(0);
+    assert!(timeout, "max_seconds=0 应立即触发超时");
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        SideEffect::Notify { title, .. } if title == "录音中"
+    )));
+
+    // 超时后应与手动停止一致：停止录音并请求识别
+    let effects = app.handle_event(AppEvent::ToggleRecording).await;
+    assert_eq!(app.state, AppState::Transcribing);
+    assert!(effects.contains(&SideEffect::StopAudio));
+    assert!(effects.iter().any(|e| matches!(e, SideEffect::RequestAsr { .. })));
+}
+
+#[tokio::test]
+async fn test_poll_recording_no_timeout_right_after_start() {
+    let mut audio = MockAudioCapture::new();
+    audio.expect_start_capture().times(1).returning(|| Ok(()));
+    audio.expect_device_name().times(2).returning(|| None);
+
+    let clipboard = MockClipboard::new();
+    let mut app = VollminputdApp::new(audio, clipboard);
+
+    app.handle_event(AppEvent::ToggleRecording).await;
+
+    let (effects, timeout) = app.poll_recording(60);
+    assert!(!timeout, "刚录音 0 秒不应超时");
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        SideEffect::Notify { title, .. } if title == "录音中"
+    )));
+}
+
+#[tokio::test]
+async fn test_poll_recording_ignores_when_not_recording() {
+    let audio = MockAudioCapture::new();
+    let clipboard = MockClipboard::new();
+    let mut app = VollminputdApp::new(audio, clipboard);
+
+    let (effects, timeout) = app.poll_recording(60);
+    assert!(!timeout);
+    assert!(effects.is_empty());
 }

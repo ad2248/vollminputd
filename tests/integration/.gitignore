@@ -1,2 +1,2 @@
-tests/integration/.env.test
-tests/integration/build-out/
+.env.test
+build-out/
