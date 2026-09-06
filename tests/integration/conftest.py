@@ -15,6 +15,7 @@ collect_ignore = ['build-out']
 INTEGRATION_DIR = Path(__file__).resolve().parent
 REPO_ROOT = INTEGRATION_DIR.parent.parent
 BUILD_OUT = INTEGRATION_DIR / 'build-out'
+OUTPUT_ENV = 'VOLLMINPUTD_TEST_OUTPUT'
 KEY_NAME = 'VOLLMINPUTD_DASHSCOPE_API_KEY'
 PROXY_KEYS = ('http_proxy', 'https_proxy', 'all_proxy',
               'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY')
@@ -50,8 +51,10 @@ def pytest_configure(config):
     config.addinivalue_line('markers', 'live: calls the real DashScope service')
     config._voiceinput_key_file = config.getoption('--key-file').resolve()
     if not config.option.collectonly:
-        config._voiceinput_output = BUILD_OUT / uuid.uuid4().hex
-        config._voiceinput_output.mkdir(parents=True)
+        configured_output = os.environ.get(OUTPUT_ENV)
+        config._voiceinput_output = (Path(configured_output).resolve() if configured_output
+                                     else BUILD_OUT / uuid.uuid4().hex)
+        config._voiceinput_output.mkdir(parents=True, exist_ok=True)
         if not config.option.xmlpath:
             config.option.xmlpath = str(config._voiceinput_output / 'junit.xml')
         if os.environ.get('GITHUB_OUTPUT'):
@@ -125,11 +128,20 @@ def run_container(image, mounts, command, output, *, network=False, env=None, ti
 def test_image(request):
     output = request.config._voiceinput_output
     name = 'localhost/vollminputd-itest'
-    # Always ask the builder: its layer cache is keyed by the recipe, not image existence.
+    image_id_file = output / 'image-id'
+    if image_id_file.is_file():
+        image_id = image_id_file.read_text().strip()
+        if image_id and subprocess.run(
+            ['podman', 'image', 'exists', image_id], stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode == 0:
+            return image_id
+        pytest.fail(f'Prepared test image is unavailable: {image_id_file}')
+    # A new session always asks the builder; its layer cache is keyed by the recipe.
     try:
         with (output / 'image-build.log').open('w') as log:
             proc = subprocess.run(
-                ['podman', 'build', '-t', name, '--iidfile', str(output / 'image-id'),
+                ['podman', 'build', '-t', name, '--iidfile', str(image_id_file),
                  '-f', str(INTEGRATION_DIR / 'Containerfile'), str(INTEGRATION_DIR)],
                 stdout=log, stderr=subprocess.STDOUT, timeout=1800,
             )
@@ -137,20 +149,23 @@ def test_image(request):
         pytest.fail(f'Image build timed out; see {output / "image-build.log"}')
     if proc.returncode:
         pytest.fail(f'Image build failed: {output / "image-build.log"}')
-    return (output / 'image-id').read_text().strip()
+    return image_id_file.read_text().strip()
 
 
 @pytest.fixture(scope='session')
 def src_tarball(request):
     output = request.config._voiceinput_output
     snapshot = output / 'source'
+    tarball = output / 'source.tar.gz'
+    source_ready = output / 'source.ready'
+    if tarball.is_file() and source_ready.is_file() and (snapshot / 'vollminputd').is_dir():
+        return tarball
     snapshot.mkdir()
     paths = subprocess.check_output(
         ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--',
          'Cargo.toml', 'Cargo.lock', 'PKGBUILD', '.SRCINFO', 'LICENSE.txt', 'README.md', 'src', 'tests'],
         cwd=REPO_ROOT,
     ).decode().split('\0')
-    tarball = output / 'source.tar.gz'
     key_file = getattr(request.config, '_voiceinput_key_file', INTEGRATION_DIR / '.env.test')
     with tarfile.open(tarball, 'w:gz') as archive:
         for name in sorted(set(paths)):
@@ -163,6 +178,7 @@ def src_tarball(request):
             archive.add(path, arcname='vollminputd/' + name, recursive=False)
     with tarfile.open(tarball) as archive:
         archive.extractall(snapshot, filter='data')
+    source_ready.touch()
     return tarball
 
 
@@ -171,13 +187,23 @@ def built_package(request, test_image, src_tarball):
     output = src_tarball.parent
     source = output / 'source' / 'vollminputd'
     packages = output / 'packages'
-    packages.mkdir()
     manifest = {
         'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=REPO_ROOT, text=True).strip(),
         'source_sha256': hashlib.sha256(src_tarball.read_bytes()).hexdigest(),
         'image_id': test_image,
     }
-    (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    found = list(packages.glob('vollminputd-git-*.pkg.tar.zst'))
+    manifest_path = output / 'manifest.json'
+    if found or manifest_path.is_file():
+        if len(found) != 1 or not manifest_path.is_file():
+            pytest.fail(f'Incomplete reusable package state: {output}')
+        recorded = json.loads(manifest_path.read_text())
+        package_sha256 = hashlib.sha256(found[0].read_bytes()).hexdigest()
+        if recorded != {**manifest, 'package_sha256': package_sha256}:
+            pytest.fail(f'Reusable package does not match this source and image: {output}')
+        return found[0]
+    packages.mkdir()
+    manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
     proc = run_container(test_image, [
         (src_tarball, '/src.tar.gz', 'ro'),
         (source / 'tests/integration/scripts', '/tests/scripts', 'ro'),
@@ -187,7 +213,7 @@ def built_package(request, test_image, src_tarball):
     found = list(packages.glob('vollminputd-git-*.pkg.tar.zst'))
     assert len(found) == 1
     manifest['package_sha256'] = hashlib.sha256(found[0].read_bytes()).hexdigest()
-    (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
     return found[0]
 
 

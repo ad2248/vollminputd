@@ -59,19 +59,20 @@ python3 tests/integration/run.py --live --key-file /path/to/local.env
 ## CI（`.gitea/workflows/tests.yml`）
 
 - 触发：push 到 `main`、`pull_request`、`workflow_dispatch`、每日定时；不使用 `pull_request_target`。
-- Runner：`runs-on: voiceinput-linux`，注册 act_runner 时必须带 host 执行标签 `voiceinput-linux:host`。作业直接跑在宿主机上，podman 编排由 run.py 完成。
-- live 门控：配置了 secret `VOLLMINPUTD_DASHSCOPE_API_KEY` 才加跑 `--live`，否则只跑离线套件并在日志注明。密钥只经环境变量注入，不落文件、不在 shell 里内插。
-- 产物：`actions/upload-artifact@v3`（该 action 的 v4 与 Gitea 不兼容），`if: always()`，只上传本次运行的输出（路径由步骤经 `GITHUB_OUTPUT` 传递），不包含旧会话。
+- Runner：`runs-on: voiceinput-linux`，注册 act_runner 时必须带 host 执行标签 `voiceinput-linux:host`。作业直接跑在宿主机上，podman 编排由 pytest fixtures 完成。
+- live 门控：配置了 secret `VOLLMINPUTD_DASHSCOPE_API_KEY` 才执行 live pytest，否则该阶段记录原因后退出；其余阶段不受影响。密钥只经 live 阶段的环境变量注入，不落文件、不在 shell 里内插。
+- 产物：`actions/upload-artifact@v3`（该 action 的 v4 与 Gitea 不兼容），`if: always()`，只上传 `VOLLMINPUTD_TEST_OUTPUT` 指向的本次运行目录，不包含旧会话。
+- 阶段：runner 隔离检查、测试镜像、打包/Rust 测试、harness、offline E2E、live E2E 分别显示；阶段间通过 `VOLLMINPUTD_TEST_OUTPUT` 指定的运行目录复用镜像 ID、源码快照和软件包，不重复构建。
 - fork 防护：同仓库 PR 检查在 checkout 之前跳过 fork 触发的整个 job，这是**尽力而为的过滤，不是安全屏障**——PR 作者可以修改自己的 workflow，因此不能视为隔离手段。在执行不受信贡献者的 workflow 之前，必须先有仅限可信成员的 runner 与 Gitea 服务端策略。
 
-### 部署步骤（手动，尚未执行）
+### Runner 部署要求
 
 1. 准备专用 Linux x86_64 原生 host，装齐上文前置条件；
 2. 将仓库与 runner 限制给可信贡献者，并配置 Gitea 服务端策略；
 3. 注册 runner 并带 host 标签：`act_runner register --labels voiceinput-linux:host ...`；建议单 job 串行（默认 capacity=1）；
 4. （可选）在仓库 Secrets 添加 `VOLLMINPUTD_DASHSCOPE_API_KEY`。
 
-本地已验证原生 HTTP API 和容器内完整 E2E（offline/live）。runner 注册与服务端配置尚未执行，workflow 尚未远程运行。
+仓库 CI 已使用上述 host 标签运行；重新部署 runner 时仍需满足这些约束。
 
 ## 覆盖边界（不在测试范围内）
 

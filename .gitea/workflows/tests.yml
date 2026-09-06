@@ -3,8 +3,8 @@
 # 运行环境约定：
 #   - 专用原生 host runner，注册标签必须是 voiceinput-linux:host（host 执行模式），
 #     工作流用 runs-on: voiceinput-linux 调度；
-#   - 作业直接跑在宿主机（无 container: 块），podman 由 tests/integration/run.py
-#     自行编排；不使用 privileged，不挂 podman socket，不挂 host 设备；
+#   - 作业直接跑在宿主机（无 container: 块），pytest fixture 编排 podman；
+#     不使用 privileged，不挂 podman socket，不挂 host 设备；
 #   - actions/checkout@v4 需要 runner host 上有 Node 20。
 name: tests
 
@@ -23,30 +23,49 @@ jobs:
     # 既不执行任何代码，也拿不到 secrets（包括 live key）。不用 pull_request_target。
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: voiceinput-linux
+    env:
+      # 多个 pytest 进程复用同一次运行的镜像、源码快照和软件包。
+      VOLLMINPUTD_TEST_OUTPUT: tests/integration/build-out/${{ github.run_id }}
     steps:
+      - name: Verify runner isolation
+        run: |
+          test ! -S /var/run/docker.sock
+          test "$(podman info --format '{{.Host.Security.Rootless}}')" = "true"
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run integration tests
-        id: tests
+      - name: Build integration image
+        run: python3 -m pytest -s tests/integration/test_build.py::test_image_ready --junitxml="$VOLLMINPUTD_TEST_OUTPUT/junit-image.xml"
+
+      - name: Build package and run Rust tests
+        run: python3 -m pytest -s tests/integration/test_build.py::test_package_exists --junitxml="$VOLLMINPUTD_TEST_OUTPUT/junit-build.xml"
+
+      - name: Test integration harness
+        run: python3 -m pytest -s tests/integration/test_harness.py --junitxml="$VOLLMINPUTD_TEST_OUTPUT/junit-harness.xml"
+
+      - name: Test offline E2E
+        run: python3 -m pytest -s tests/integration/test_toggle.py::test_toggle_offline --junitxml="$VOLLMINPUTD_TEST_OUTPUT/junit-offline.xml"
+
+      - name: Test live ASR E2E
         env:
           # 密钥只经环境变量注入：不落文件、不在 run 脚本里内插 secrets 表达式
           VOLLMINPUTD_DASHSCOPE_API_KEY: ${{ secrets.VOLLMINPUTD_DASHSCOPE_API_KEY }}
+          VOLLMINPUTD_ASR_ENDPOINT: ${{ vars.VOLLMINPUTD_ASR_ENDPOINT }}
+          VOLLMINPUTD_ASR_MODEL: ${{ vars.VOLLMINPUTD_ASR_MODEL }}
         run: |
           if [ -z "$VOLLMINPUTD_DASHSCOPE_API_KEY" ]; then
-            echo "===== 未配置 secret VOLLMINPUTD_DASHSCOPE_API_KEY：live DashScope 用例禁用，仅跑离线套件 ====="
-            python3 tests/integration/run.py
-          else
-            echo "===== 已配置 DashScope key：跑离线 + live（原生 HTTP 单后端）====="
-            python3 tests/integration/run.py --live
+            echo "未配置 secret VOLLMINPUTD_DASHSCOPE_API_KEY，跳过 live DashScope 用例"
+            exit 0
           fi
+          python3 -m pytest -s --live tests/integration/test_toggle.py::test_toggle_live --junitxml="$VOLLMINPUTD_TEST_OUTPUT/junit-live.xml"
 
       # 成败都上传留证：build-out/ 内为每会话日志、源码/包清单与 JUnit 结果，
       # 不含机密（源码快照不含 .env.test）。
-       # 用 v3：actions/upload-artifact@v4 与当前 Gitea 不兼容。
+      # 用 v3：actions/upload-artifact@v4 与当前 Gitea 不兼容。
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@v3
         with:
           name: integration-test-artifacts
-          path: ${{ steps.tests.outputs.artifacts }}
+          path: ${{ env.VOLLMINPUTD_TEST_OUTPUT }}
