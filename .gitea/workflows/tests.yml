@@ -29,7 +29,7 @@ jobs:
     steps:
       - name: Verify runner isolation
         run: |
-          test ! -S /var/run/docker.sock
+          test "$(id -u)" -ne 0
           test "$(podman info --format '{{.Host.Security.Rootless}}')" = "true"
 
       - name: Checkout
