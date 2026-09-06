@@ -147,7 +147,7 @@ def src_tarball(request):
     snapshot.mkdir()
     paths = subprocess.check_output(
         ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--',
-         'Cargo.toml', 'Cargo.lock', 'PKGBUILD', 'LICENSE.txt', 'README.md', 'src', 'tests'],
+         'Cargo.toml', 'Cargo.lock', 'PKGBUILD', '.SRCINFO', 'LICENSE.txt', 'README.md', 'src', 'tests'],
         cwd=REPO_ROOT,
     ).decode().split('\0')
     tarball = output / 'source.tar.gz'

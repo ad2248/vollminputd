@@ -14,6 +14,7 @@
 ## 系统要求
 
 - **操作系统**：Linux（Wayland 桌面环境）
+- **编译工具链**：Rust/Cargo 1.87 或更新版本；2024 edition 本身要求 1.85，当前锁定的 `zbus` 依赖进一步要求 1.87。不需要 nightly。
 - **系统依赖**：
   - `wl-copy`（[wl-clipboard](https://github.com/bugaevc/wl-clipboard) 包提供）
   - 音频输入设备（麦克风）
@@ -40,9 +41,32 @@ export VOLLMINPUTD_DASHSCOPE_API_KEY="your-api-key"
 
 ### 3. 编译运行
 
+先确认 `cargo --version` 和 `rustc --version` 均不低于 1.87。
+若使用 rustup，执行 `rustup update stable`；`stable` 只是本地工具链名称，不保证它已经更新。
+
 ```bash
-cargo build --release
+cargo build --locked --release
 ```
+
+### Arch Linux / AUR 安装说明
+
+`yay -S vollminputd-git` 使用 AUR 仓库单独维护的 `PKGBUILD` 和 `.SRCINFO`。
+应用仓库合并代码不会自动更新 AUR 配方，即使 `-git` 包已经拉取了最新源码。
+
+本仓库配方要求官方 `rust>=1:1.87`（`1:` 为 Arch 包 epoch）、`clang`，并声明 `alsa-lib`、`libpipewire` 等依赖；
+编译与测试显式调用 `/usr/bin/cargo` 和 `/usr/bin/rustc`，避免 `~/.cargo/bin` 中的旧工具链抢先被使用。
+如果 pacman 安装的 `rustup` 与官方 `rust` 包冲突，应选择一种安装方式：使用官方工具链构建发行包，或用更新后的 rustup 手动编译源码。
+
+使用当前仓库配方本地安装（普通用户执行 `makepkg`）：
+
+```bash
+sudo pacman -Syu --needed base-devel rust clang git
+# 在当前仓库根目录；makepkg -s 会安装配方声明的其他依赖
+makepkg -Csi
+```
+
+维护者发布 AUR 时需同步本仓库 `PKGBUILD` 和 `.SRCINFO`；修改配方后运行
+`makepkg --printsrcinfo > .SRCINFO` 重新生成元数据。AUR 更新之前，不能将仓库内的安装验证视为 `yay -S` 已修复。
 
 ### 4. 启动守护进程
 

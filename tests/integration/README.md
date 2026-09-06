@@ -5,6 +5,7 @@
 ## 测试内容
 
 - **构建/打包**：容器内产出 `.pkg.tar.zst`。复用仓库根 [PKGBUILD](../../PKGBUILD) 的生产打包逻辑，测试侧只做 source/version 覆盖（wrapper），不维护另一套打包逻辑。
+- **工具链回归**：故意在 PATH 前放置不可用的 Cargo/Rust 包装器，并设置错误的 `RUSTC`/`RUSTDOC`，确认配方仍使用发行版工具链。另检查 `.SRCINFO` 与正式配方一致。最低依赖要求为 Rust 1.87；容器固定工具链的构建通过不代表所有最低版本组合或 AUR 发布渠道均已验证。
 - **TOGGLE E2E**：容器内 `pacman -U` 安装产物 → PipeWire + wireplumber + pw-loopback 虚拟麦克风 → sway headless → 启动 vollminputd → FIFO `TOGGLE` ×2 夹一段 `pw-play` 播放 → 断言剪贴板。音频走 daemon 真实的 cpal 采集路径（ALSA → PipeWire 虚拟麦克风），不注入 PCM。
 - **ASR**：单一原生 HTTP 后端/模型 `qwen-audio-3.0-asr-flash`；一个 offline 场景（2 轮 TOGGLE）+ 一个 live 场景（1 轮 TOGGLE）。
   - offline（默认）：容器内本地 HTTP mock 按原生协议应答（`input.messages` + `parameters`，其中 `format="wav"`、`sample_rate="16000"`，音频为 `data:audio/wav;base64,...`；应答取 `text` 或 `output.text`），校验鉴权与音频非空非静音，剪贴板必须精确等于预期文本。
