@@ -1,0 +1,32 @@
+# Project-specific CI base: pinned system packages plus the Cargo.lock dependency set.
+FROM docker.io/library/archlinux@sha256:694da1fce635e3a14d90751941b08f02c500e8724682f7a00768e7152251ec34
+
+LABEL org.opencontainers.image.source="https://git.kals.top/kals/VoiceInput" \
+      org.opencontainers.image.description="vollminputd integration-test dependencies and vendored Rust crates"
+
+RUN printf 'Server = https://archive.archlinux.org/repos/2026/09/01/$repo/os/$arch\n' > /etc/pacman.d/mirrorlist && \
+    sed -i '/^\[options\]/a XferCommand = /usr/bin/curl --http1.1 -fsSL -C - --retry 5 --retry-all-errors --connect-timeout 30 --max-time 600 -o %o %u' /etc/pacman.conf
+RUN --mount=type=cache,target=/var/cache/pacman/pkg \
+    pacman -Syyuu --noconfirm && \
+    pacman -S --noconfirm --needed \
+        base-devel git sudo rust cargo clang \
+        pipewire pipewire-audio pipewire-alsa pipewire-pulse wireplumber \
+        sway wl-clipboard alsa-lib alsa-utils openssl dbus \
+        python python-pytest && \
+    useradd -m builder && \
+    setcap -r /usr/bin/sway
+
+# Keep the exact inputs in the image so the consuming build can reject a stale base.
+COPY --chown=builder:builder Cargo.toml Cargo.lock /opt/vollminputd-deps/
+RUN install -d -o builder -g builder \
+        /home/builder/.cargo /opt/vollminputd-deps/src /opt/vollminputd-vendor && \
+    printf 'fn main() {}\n' > /opt/vollminputd-deps/src/main.rs && \
+    chown builder:builder /opt/vollminputd-deps/src/main.rs && \
+    sudo -H -u builder sh -c \
+        '/usr/bin/cargo vendor --locked --versioned-dirs /opt/vollminputd-vendor --manifest-path /opt/vollminputd-deps/Cargo.toml > "$HOME/.cargo/config.toml"' && \
+    printf '\n[net]\noffline = true\n' >> /home/builder/.cargo/config.toml && \
+    rm -rf /home/builder/.cargo/git /home/builder/.cargo/registry && \
+    chown -R builder:builder /home/builder/.cargo /opt/vollminputd-deps /opt/vollminputd-vendor
+
+WORKDIR /tests
+CMD ["/bin/bash"]

@@ -1,0 +1,69 @@
+name: Publish CI base image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: voiceinput-linux
+    env:
+      IMAGE_REPOSITORY: git.kals.top/kals/vollminputd-ci
+    steps:
+      - name: Verify runner isolation
+        run: |
+          test "$(id -u)" -ne 0
+          test "$(podman info --format '{{.Host.Security.Rootless}}')" = "true"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute content-addressed tag
+        id: image
+        run: |
+          fingerprint="$({ sha256sum tests/integration/Containerfile.base Cargo.toml Cargo.lock; } | sha256sum | cut -c1-12)"
+          image="$IMAGE_REPOSITORY:arch-$fingerprint"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Building $image"
+
+      - name: Authenticate to Gitea Registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: |
+          auth_file="$(mktemp)"
+          chmod 600 "$auth_file"
+          echo "REGISTRY_AUTH_FILE=$auth_file" >> "$GITHUB_ENV"
+          printf '%s' "$REGISTRY_TOKEN" | podman login git.kals.top \
+            --authfile "$auth_file" --username "${{ gitea.actor }}" --password-stdin
+
+      - name: Build base image
+        run: |
+          podman build --pull=missing \
+            --file tests/integration/Containerfile.base \
+            --tag "${{ steps.image.outputs.image }}" .
+
+      - name: Verify vendored dependencies offline
+        run: |
+          podman run --rm --network=none --http-proxy=false \
+            --volume "$PWD:/src:ro" \
+            "${{ steps.image.outputs.image }}" \
+            sudo -H -u builder env CARGO_NET_OFFLINE=true \
+            /usr/bin/cargo metadata --locked --offline --format-version=1 \
+            --manifest-path /src/Cargo.toml >/dev/null
+
+      - name: Push base image
+        id: push
+        run: |
+          digest_file="$(mktemp)"
+          podman push --digestfile "$digest_file" "${{ steps.image.outputs.image }}"
+          digest="$(cat "$digest_file")"
+          rm -f "$digest_file"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Published ${{ steps.image.outputs.image }}@$digest"
+
+      - name: Remove Registry credentials
+        if: always()
+        run: rm -f "${REGISTRY_AUTH_FILE:-}"
