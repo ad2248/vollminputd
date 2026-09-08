@@ -63,6 +63,7 @@ python3 tests/integration/run.py --live --key-file /path/to/local.env
 - live 门控：配置了 secret `VOLLMINPUTD_DASHSCOPE_API_KEY` 才执行 live pytest，否则该阶段记录原因后退出；其余阶段不受影响。密钥只经 live 阶段的环境变量注入，不落文件、不在 shell 里内插。
 - 产物：`actions/upload-artifact@v3`（该 action 的 v4 与 Gitea 不兼容），`if: always()`，只上传 `VOLLMINPUTD_TEST_OUTPUT` 指向的本次运行目录，不包含旧会话。
 - 阶段：runner 隔离检查、测试镜像、打包/Rust 测试、harness、offline E2E、live E2E 分别显示；阶段间通过 `VOLLMINPUTD_TEST_OUTPUT` 指定的运行目录复用镜像 ID、源码快照和软件包，不重复构建。
+- 基础镜像：`Containerfile.base` 固化系统依赖和 `Cargo.lock` 对应的 vendored crates；发布及依赖升级流程见 [CI_IMAGE_RUNBOOK.md](CI_IMAGE_RUNBOOK.md)。切换到 Registry digest 前，现有 `Containerfile` 仍负责本地构建依赖镜像。
 - fork 防护：同仓库 PR 检查在 checkout 之前跳过 fork 触发的整个 job，这是**尽力而为的过滤，不是安全屏障**——PR 作者可以修改自己的 workflow，因此不能视为隔离手段。在执行不受信贡献者的 workflow 之前，必须先有仅限可信成员的 runner 与 Gitea 服务端策略。
 
 ### Runner 部署要求
