@@ -70,6 +70,18 @@ makepkg -Csi
 
 ### 4. 启动守护进程
 
+可以先列出 CPAL 可用的输入设备：
+
+```bash
+./target/release/vollminputd --list-input-devices
+```
+
+如需手动选择麦克风，将列表中的设备 ID 或完整名称设置到环境变量；不设置时使用系统默认输入设备：
+
+```bash
+export VOLLMINPUTD_AUDIO_DEVICE="<设备 ID 或完整名称>"
+```
+
 确保已设置所需环境变量，然后启动守护进程：
 
 ```bash
@@ -102,6 +114,7 @@ vollminputd 通过环境变量进行配置：
 | `VOLLMINPUTD_MAX_RECORDING_SECONDS` | integer | `60` | 最大录音时长（秒），超时自动停止 |
 | `VOLLMINPUTD_AUDIO_SAMPLE_RATE` | integer | `16000` | 音频采样率（Hz） |
 | `VOLLMINPUTD_AUDIO_CHANNELS` | integer | `1` | 音频通道数 |
+| `VOLLMINPUTD_AUDIO_DEVICE` | string | 系统默认设备 | 可选，输入设备的完整名称或 `--list-input-devices` 显示的设备 ID |
 
 > 准确性说明：当前实际录音固定为 16 kHz、16 bit、单声道（实现内硬编码），`VOLLMINPUTD_AUDIO_SAMPLE_RATE` / `VOLLMINPUTD_AUDIO_CHANNELS` 不会改变采集参数。
 
@@ -112,7 +125,10 @@ export VOLLMINPUTD_DASHSCOPE_API_KEY="sk-xxx...xxxx"
 export VOLLMINPUTD_MAX_RECORDING_SECONDS="60"
 export VOLLMINPUTD_AUDIO_SAMPLE_RATE="16000"
 export VOLLMINPUTD_AUDIO_CHANNELS="1"
+export VOLLMINPUTD_AUDIO_DEVICE="<设备 ID 或完整名称>"
 ```
+
+设备 ID 优先于设备名称进行精确匹配。存在多个同名设备时必须使用设备 ID；指定设备不可用时录音会失败，不会自动切换到其他麦克风。
 
 ## ASR 接口
 

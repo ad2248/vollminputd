@@ -41,6 +41,7 @@ fn factory_config(endpoint: String) -> Config {
         max_recording_seconds: 60,
         audio_sample_rate: 16000,
         audio_channels: 1,
+        audio_device: None,
         asr_endpoint: endpoint,
         asr_model: "qwen-audio-3.0-asr-flash".to_string(),
     }

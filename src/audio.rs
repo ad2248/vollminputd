@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -19,39 +19,112 @@ pub struct CpalAudioCapture {
     start_time: Option<Instant>,
     stream: Option<cpal::Stream>,
     device_name: Option<String>,
+    device_selector: Option<String>,
 }
 
 impl CpalAudioCapture {
-    pub fn new() -> Self {
-        let host = cpal::default_host();
-        // cpal 0.18: device.name() 被 device.description() / device.id() 替代
-        // DeviceId 不再有 name()，但实现了 Display，直接 format 即可
-        let device_name = host
-            .default_input_device()
-            .and_then(|d| {
-                d.description()
-                    .ok()
-                    .map(|desc| desc.name().to_string())
-                    .or_else(|| d.id().ok().map(|id| id.to_string()))
-            });
-
+    pub fn new(device_selector: Option<String>) -> Self {
         Self {
             buffer: Arc::new(Mutex::new(Vec::new())),
             is_capturing: false,
             start_time: None,
             stream: None,
-            device_name,
+            device_name: None,
+            device_selector,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputDeviceInfo {
+    pub id: Option<String>,
+    pub name: String,
+    pub is_default: bool,
+}
+
+pub fn list_input_devices() -> Result<Vec<InputDeviceInfo>> {
+    let host = cpal::default_host();
+    Ok(input_device_records(&host)?
+        .into_iter()
+        .map(|(_, info)| info)
+        .collect())
+}
+
+fn input_device_records(host: &cpal::Host) -> Result<Vec<(cpal::Device, InputDeviceInfo)>> {
+    let default_id = host
+        .default_input_device()
+        .and_then(|device| device.id().ok())
+        .map(|id| id.to_string());
+    let devices = host.input_devices().context("无法枚举音频输入设备")?;
+
+    Ok(devices
+        .map(|device| {
+            let id = device.id().ok().map(|id| id.to_string());
+            let name = device
+                .description()
+                .ok()
+                .map(|description| description.name().to_string())
+                .or_else(|| id.clone())
+                .unwrap_or_else(|| "未知设备".to_string());
+            let is_default = id.is_some() && id == default_id;
+            (device, InputDeviceInfo { id, name, is_default })
+        })
+        .collect())
+}
+
+fn matching_device_index(selector: &str, devices: &[InputDeviceInfo]) -> Result<usize> {
+    if let Some(index) = devices
+        .iter()
+        .position(|device| device.id.as_deref() == Some(selector))
+    {
+        return Ok(index);
+    }
+
+    let name_matches: Vec<_> = devices
+        .iter()
+        .enumerate()
+        .filter(|(_, device)| device.name == selector)
+        .map(|(index, _)| index)
+        .collect();
+
+    match name_matches.as_slice() {
+        [index] => Ok(*index),
+        [] => anyhow::bail!("找不到指定的音频输入设备: {selector}"),
+        _ => anyhow::bail!("存在多个名为 '{selector}' 的输入设备，请改用设备 ID"),
+    }
+}
+
+fn resolve_input_device(host: &cpal::Host, selector: Option<&str>) -> Result<cpal::Device> {
+    let Some(selector) = selector else {
+        return host
+            .default_input_device()
+            .ok_or_else(|| anyhow::anyhow!("没有可用的默认音频输入设备"));
+    };
+
+    let mut records = input_device_records(host)?;
+    let infos: Vec<_> = records.iter().map(|(_, info)| info.clone()).collect();
+    let index = matching_device_index(selector, &infos).map_err(|error| {
+        let available = infos
+            .iter()
+            .map(|device| match &device.id {
+                Some(id) => format!("{} (ID: {})", device.name, id),
+                None => device.name.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        anyhow::anyhow!(
+            "{error}。可用设备: {}",
+            if available.is_empty() { "无" } else { &available }
+        )
+    })?;
+    Ok(records.swap_remove(index).0)
 }
 
 #[async_trait::async_trait]
 impl AudioCapture for CpalAudioCapture {
     async fn start_capture(&mut self) -> Result<()> {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| anyhow::anyhow!("No input device available"))?;
+        let device = resolve_input_device(&host, self.device_selector.as_deref())?;
 
         // cpal 0.18: device.name() 被 device.description() / device.id() 替代
         // DeviceId 实现了 Display（不再是 name()），直接 format
@@ -157,6 +230,50 @@ pub fn pcm_to_wav(pcm_data: &[u8], sample_rate: u32, channels: u16) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn device(id: Option<&str>, name: &str) -> InputDeviceInfo {
+        InputDeviceInfo {
+            id: id.map(str::to_string),
+            name: name.to_string(),
+            is_default: false,
+        }
+    }
+
+    #[test]
+    fn device_id_match_takes_priority_over_name() {
+        let devices = vec![
+            device(Some("first-id"), "target"),
+            device(Some("target"), "other"),
+        ];
+
+        assert_eq!(matching_device_index("target", &devices).unwrap(), 1);
+    }
+
+    #[test]
+    fn unique_exact_device_name_can_be_selected() {
+        let devices = vec![device(Some("first-id"), "USB Microphone")];
+
+        assert_eq!(matching_device_index("USB Microphone", &devices).unwrap(), 0);
+    }
+
+    #[test]
+    fn duplicate_device_name_requires_id() {
+        let devices = vec![
+            device(Some("first-id"), "USB Microphone"),
+            device(Some("second-id"), "USB Microphone"),
+        ];
+
+        let error = matching_device_index("USB Microphone", &devices).unwrap_err();
+        assert!(error.to_string().contains("设备 ID"));
+    }
+
+    #[test]
+    fn unknown_device_is_rejected() {
+        let devices = vec![device(Some("first-id"), "USB Microphone")];
+
+        let error = matching_device_index("missing", &devices).unwrap_err();
+        assert!(error.to_string().contains("找不到"));
+    }
 
     #[tokio::test]
     async fn test_mock_start_stop_lifecycle() {
