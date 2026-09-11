@@ -13,6 +13,7 @@ fn clear_env_vars() {
         "VOLLMINPUTD_MAX_RECORDING_SECONDS",
         "VOLLMINPUTD_AUDIO_SAMPLE_RATE",
         "VOLLMINPUTD_AUDIO_CHANNELS",
+        "VOLLMINPUTD_AUDIO_DEVICE",
     ] {
         unsafe { env::remove_var(key); }
     }
@@ -26,6 +27,7 @@ fn test_load_full_config() {
     unsafe { env::set_var("VOLLMINPUTD_MAX_RECORDING_SECONDS", "120"); }
     unsafe { env::set_var("VOLLMINPUTD_AUDIO_SAMPLE_RATE", "44100"); }
     unsafe { env::set_var("VOLLMINPUTD_AUDIO_CHANNELS", "2"); }
+    unsafe { env::set_var("VOLLMINPUTD_AUDIO_DEVICE", "  test-device-id  "); }
     unsafe { env::set_var("VOLLMINPUTD_ASR_ENDPOINT", "http://127.0.0.1:18903/generation"); }
     unsafe { env::set_var("VOLLMINPUTD_ASR_MODEL", "custom-asr-model"); }
 
@@ -34,6 +36,7 @@ fn test_load_full_config() {
     assert_eq!(config.max_recording_seconds, 120);
     assert_eq!(config.audio_sample_rate, 44100);
     assert_eq!(config.audio_channels, 2);
+    assert_eq!(config.audio_device.as_deref(), Some("test-device-id"));
     assert_eq!(config.asr_endpoint, "http://127.0.0.1:18903/generation");
     assert_eq!(config.asr_model, "custom-asr-model");
 }
@@ -49,6 +52,7 @@ fn test_load_minimal_config() {
     assert_eq!(config.max_recording_seconds, 60);
     assert_eq!(config.audio_sample_rate, 16000);
     assert_eq!(config.audio_channels, 1);
+    assert_eq!(config.audio_device, None);
     assert_eq!(config.asr_endpoint, DEFAULT_ASR_ENDPOINT);
     assert_eq!(config.asr_model, DEFAULT_ASR_MODEL);
 }
@@ -100,6 +104,17 @@ fn test_asr_model_blank_falls_back_to_default() {
 
     let config = Config::from_env().unwrap();
     assert_eq!(config.asr_model, DEFAULT_ASR_MODEL);
+}
+
+#[test]
+fn test_audio_device_blank_uses_system_default() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    clear_env_vars();
+    unsafe { env::set_var("VOLLMINPUTD_DASHSCOPE_API_KEY", "test-key"); }
+    unsafe { env::set_var("VOLLMINPUTD_AUDIO_DEVICE", "  "); }
+
+    let config = Config::from_env().unwrap();
+    assert_eq!(config.audio_device, None);
 }
 
 #[test]

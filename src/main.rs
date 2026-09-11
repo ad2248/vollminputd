@@ -1,6 +1,6 @@
 use vollminputd::app::{SideEffect, VollminputdApp};
 use vollminputd::asr::create_asr_engine;
-use vollminputd::audio::CpalAudioCapture;
+use vollminputd::audio::{list_input_devices, CpalAudioCapture};
 use vollminputd::clipboard::WlCopyClipboard;
 use vollminputd::config::Config;
 use vollminputd::notifier::{Notifier, NotifyRustNotifier};
@@ -18,8 +18,36 @@ enum ImeCommand {
     Toggle,
 }
 
-fn parse_instance_arg() -> String {
+enum StartupAction {
+    Run(String),
+    ListInputDevices,
+}
+
+fn print_help(program: &str) {
+    eprintln!(
+        "Usage:\n  {program} --instance <NAME>\n  {program} --list-input-devices\n\nOptions:\n  --instance <NAME>       启动指定实例\n  --list-input-devices    列出可选的音频输入设备\n  -h, --help              显示此帮助信息"
+    );
+}
+
+fn parse_startup_action() -> StartupAction {
+    let program = env::args()
+        .next()
+        .unwrap_or_else(|| "vollminputd".to_string());
     let mut args = env::args().skip(1);
+    let Some(first_arg) = args.next() else {
+        print_help(&program);
+        process::exit(1);
+    };
+
+    if first_arg == "--list-input-devices" {
+        return StartupAction::ListInputDevices;
+    }
+    if first_arg == "-h" || first_arg == "--help" {
+        print_help(&program);
+        process::exit(0);
+    }
+
+    let mut args = std::iter::once(first_arg).chain(args);
     while let Some(arg) = args.next() {
         if arg == "--instance" {
             if let Some(instance) = args.next() {
@@ -27,22 +55,43 @@ fn parse_instance_arg() -> String {
                     eprintln!("[ERROR] 实例名不能包含 '/'");
                     process::exit(1);
                 }
-                return instance;
+                return StartupAction::Run(instance);
             } else {
                 eprintln!("[ERROR] --instance 缺少值");
+                print_help(&program);
                 process::exit(1);
             }
         }
     }
-    eprintln!("Usage: {} --instance <NAME>", env::args().next().unwrap_or_else(|| "vollminputd".to_string()));
+    print_help(&program);
     process::exit(1);
+}
+
+fn print_input_device_list() -> anyhow::Result<()> {
+    let devices = list_input_devices()?;
+    if devices.is_empty() {
+        println!("没有发现音频输入设备");
+        return Ok(());
+    }
+
+    println!("可用的音频输入设备：");
+    for device in devices {
+        let default_marker = if device.is_default { " [默认]" } else { "" };
+        println!("- {}{}", device.name, default_marker);
+        println!("  ID: {}", device.id.as_deref().unwrap_or("不可用"));
+    }
+    println!("\n通过 VOLLMINPUTD_AUDIO_DEVICE=<设备 ID 或完整名称> 选择麦克风。");
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let StartupAction::Run(instance) = parse_startup_action() else {
+        return print_input_device_list();
+    };
+
     println!("[INFO] 语音输入法守护进程启动");
 
-    let instance = parse_instance_arg();
     let fifo_path = format!("/tmp/vollminputd_{}.fifo", instance);
 
     let config = Config::from_env()?;
@@ -51,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
     setup_fifo(&fifo_path)?;
     println!("[INFO] FIFO 已创建: {}", fifo_path);
 
-    let audio = CpalAudioCapture::new();
+    let audio = CpalAudioCapture::new(config.audio_device.clone());
     let clipboard = WlCopyClipboard::new();
     let mut app = VollminputdApp::new(audio, clipboard);
 

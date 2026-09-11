@@ -9,6 +9,7 @@ pub struct Config {
     pub max_recording_seconds: u64,
     pub audio_sample_rate: u32,
     pub audio_channels: u16,
+    pub audio_device: Option<String>,
     /// ASR 服务完整端点 URL
     pub asr_endpoint: String,
     /// ASR 模型名称
@@ -36,6 +37,11 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1);
 
+        let audio_device = env::var("VOLLMINPUTD_AUDIO_DEVICE")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
         let asr_endpoint = env::var("VOLLMINPUTD_ASR_ENDPOINT")
             .ok()
             .map(|s| s.trim().to_string())
@@ -53,6 +59,7 @@ impl Config {
             max_recording_seconds,
             audio_sample_rate,
             audio_channels,
+            audio_device,
             asr_endpoint,
             asr_model,
         })
