@@ -17,3 +17,8 @@ def test_package_exists(built_package: Path):
     assert built_package.exists(), f"产物不存在: {built_package}"
     size = built_package.stat().st_size
     assert size > 1_000_000, f"产物太小 ({size} bytes)，可能构建不完整"
+
+
+def test_package_filename_is_upload_safe(built_package: Path):
+    """Actions artifact 不接受 epoch 在包文件名中引入的冒号。"""
+    assert ':' not in built_package.name

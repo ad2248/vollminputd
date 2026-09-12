@@ -44,7 +44,8 @@ def main():
     packages = list(build.glob('vollminputd-git-[0-9]*.pkg.tar.zst'))
     if len(packages) != 1:
         raise RuntimeError(f'Expected one package, found {len(packages)}')
-    shutil.copyfile(packages[0], Path('/build-out') / packages[0].name)
+    artifact_name = packages[0].name.replace(':', '_')
+    shutil.copyfile(packages[0], Path('/build-out') / artifact_name)
 
 
 if __name__ == '__main__':
