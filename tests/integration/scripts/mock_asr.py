@@ -4,8 +4,9 @@
 仅接受 POST --path（默认 /api/v1/services/aigc/multimodal-generation/generation），
 逐项校验 Authorization == Bearer $MOCK_EXPECTED_KEY、X-DashScope-SSE: disable、
 model、parameters（format=wav、sample_rate=16000）与 WAV 头（16kHz/mono/16bit PCM）
-且音频非空非静音；通过返回固定 --text（{text, output:{text}}），否则回协议错误；
-每请求记一行 JSONL 到 --requests-log（E2E 断言 ok=false 记录为 0），不记录 key 本身。
+且音频非空非静音，按参数校验尾部静音；通过返回固定 --text（{text, output:{text}}），
+否则回协议错误；每请求记一行 JSONL 到 --requests-log（E2E 断言 ok=false 记录为 0），
+不记录 key 本身。
 """
 import argparse
 import base64
@@ -29,9 +30,10 @@ def log(m):
     print(f"[mock_asr] {m}", flush=True)
 
 
-def record(checks, n, peak, ok, reason):
+def record(checks, n, peak, trailing_silence_ms, ok, reason):
     rec = {"ts": round(time.time(), 3), **checks, "audio_bytes": n,
-           "peak": peak, "ok": ok, "reason": reason}
+           "peak": peak, "trailing_silence_ms": trailing_silence_ms,
+           "ok": ok, "reason": reason}
     with _lock, open(ARGS.requests_log, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
@@ -66,6 +68,13 @@ def pcm_peak(pcm: bytes) -> int:
     return max(map(abs, struct.unpack_from(f"<{len(pcm) // 2}h", pcm)), default=0)
 
 
+def trailing_silence_ms(pcm: bytes) -> int:
+    samples = struct.unpack_from(f"<{len(pcm) // 2}h", pcm)
+    last_audio = next((i for i in range(len(samples) - 1, -1, -1)
+                       if abs(samples[i]) >= PEAK_MIN), -1)
+    return (len(samples) - last_audio - 1) * 1000 // 16000
+
+
 class Handler(BaseHTTPRequestHandler):
     def _json(self, code, obj):
         b = json.dumps(obj).encode()
@@ -81,9 +90,9 @@ class Handler(BaseHTTPRequestHandler):
                   "sse_ok": self.headers.get("X-DashScope-SSE") == "disable",
                   "model_ok": False, "params_ok": False, "wav_ok": False}
         if not checks["path_ok"]:
-            record(checks, 0, 0, False, f"路径错误: {self.path}")
+            record(checks, 0, 0, 0, False, f"路径错误: {self.path}")
             return self._json(404, {"error": {"message": "not found"}})
-        n = peak = 0
+        n = peak = trailing_ms = 0
         why = ""
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
@@ -97,18 +106,22 @@ class Handler(BaseHTTPRequestHandler):
                         if isinstance(c, dict) and c.get("type") == "input_audio")
             why, pcm = check_wav(base64.b64decode(data.split("base64,", 1)[1]))
             checks["wav_ok"], n, peak = not why, len(pcm), pcm_peak(pcm)
+            trailing_ms = trailing_silence_ms(pcm)
         except Exception as e:
-            record(checks, 0, 0, False, f"请求/音频解析失败: {e}")
+            record(checks, 0, 0, 0, False, f"请求/音频解析失败: {e}")
             return self._json(400, {"error": {"message": "bad request"}})
         if not why and not all(checks.values()):
             why = "校验失败: " + ",".join(k for k, v in checks.items() if not v)
         if not why and (n < MIN_BYTES or peak < PEAK_MIN):
             why = f"音频无效/静音 (bytes={n}, peak={peak})"
+        if not why and trailing_ms < ARGS.min_trailing_silence_ms:
+            why = (f"尾部静音不足 (actual={trailing_ms}ms, "
+                   f"required={ARGS.min_trailing_silence_ms}ms)")
         if why:
-            record(checks, n, peak, False, why)
+            record(checks, n, peak, trailing_ms, False, why)
             return self._json(401 if not checks["auth_ok"] else 400,
                               {"error": {"message": why}})
-        record(checks, n, peak, True, "ok")
+        record(checks, n, peak, trailing_ms, True, "ok")
         self._json(200, {"text": ARGS.text, "output": {"text": ARGS.text}})
 
 
@@ -120,6 +133,7 @@ def main():
     ap.add_argument("--model", required=True)
     ap.add_argument("--text", required=True)
     ap.add_argument("--requests-log", required=True)
+    ap.add_argument("--min-trailing-silence-ms", type=int, default=0)
     ARGS = ap.parse_args()
     if not (KEY := os.environ.get("MOCK_EXPECTED_KEY", "")):
         log("!! 缺 MOCK_EXPECTED_KEY（离线也必须校验鉴权）")

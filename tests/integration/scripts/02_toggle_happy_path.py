@@ -7,7 +7,7 @@ TOGGLE happy path E2E（容器内、root、由 host 在 dbus-run-session 下启�
 qwen-audio-3.0-asr-flash）；TEST_LIVE_ASR=1 时必须有 VOLLMINPUTD_DASHSCOPE_API_KEY
 （host 注入，脚本不读 key 文件）。离线：容器内起 mock_asr.py（HTTP :18765，原生
 DashScope 协议），daemon 经 VOLLMINPUTD_ASR_ENDPOINT 指向 mock；mock 校验路径/鉴权/
-SSE 头/model/参数与音频，任何失败请求 → 本轮失败；live 不碰 endpoint（用 daemon 默认
+SSE 头/model/参数、短尾音与收尾静音，任何失败请求 → 本轮失败；live 不碰 endpoint（用 daemon 默认
 端点或宿主透传的 VOLLMINPUTD_ASR_ENDPOINT）。每轮：清剪贴板 → TOGGLE → 等录音就绪 →
 pw-play 播 WAV → TOGGLE → 等识别结果 + 「新状态: Idle」→ 剪贴板 == daemon 识别文本
 （离线/live 同样精确断言）。离线固定 2 轮，live 1 轮。全程轮询就绪，无固定 sleep。
@@ -18,14 +18,17 @@ import os
 import re
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import time
+import wave
 from pathlib import Path
 
 INSTANCE = os.environ.get("TEST_INSTANCE", "itest")
 FIFO = Path(f"/tmp/vollminputd_{INSTANCE}.fifo")
 AUDIO = Path("/tests/repo-tests/test_audio.wav")
+TAIL_AUDIO = Path("/tmp/tail-audio.wav")
 SCRIPTS = Path("/tests/scripts")
 LOGS = Path("/tmp/e2e-logs")
 ARTIFACTS = Path("/artifacts")
@@ -167,7 +170,8 @@ def start_mock(key):
     p = spawn("mock_asr",
               [sys.executable, str(SCRIPTS / "mock_asr.py"),
                "--port", str(MOCK_PORT), "--path", MOCK_PATH,
-               "--model", MODEL, "--text", TEXT, "--requests-log", str(MOCK_REQ)])
+               "--model", MODEL, "--text", TEXT, "--requests-log", str(MOCK_REQ),
+               "--min-trailing-silence-ms", "200"])
 
     def port_ok():
         s = socket.socket()
@@ -215,6 +219,18 @@ def start_audio():
         return ok, r.stdout[-200:]
     poll(nodes_ready, T["mic"], "test-mic/test-sink 节点出现")
     assert_default_source()
+
+
+def create_tail_audio():
+    """Generate silence followed by a short marker right before playback stops."""
+    rate = 16000
+    silence = [0] * (rate // 2)
+    marker = [12000 if i % 4 < 2 else -12000 for i in range(rate * 40 // 1000)]
+    with wave.open(str(TAIL_AUDIO), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(struct.pack(f"<{len(silence) + len(marker)}h", *(silence + marker)))
 
 
 def start_compositor():
@@ -293,7 +309,8 @@ def do_round(idx):
     fifo_write("TOGGLE\n")
     wait_log(r"副作用: 启动音频采集", T["record"])
     log("录音就绪，播放测试音频")
-    r = run(["pw-play", "--target=test-sink", str(AUDIO)], T["play"], "pw-play")
+    audio = AUDIO if LIVE else TAIL_AUDIO
+    r = run(["pw-play", "--target=test-sink", str(audio)], T["play"], "pw-play")
     if r.returncode != 0:
         raise StepFailure(f"pw-play rc={r.returncode}\n{r.stdout}{r.stderr}")
     log("播放完毕，第二次 TOGGLE")
@@ -335,6 +352,7 @@ def main():
     if not AUDIO.exists() or AUDIO.stat().st_size == 0:
         log(f"!! 缺测试音频 {AUDIO}")
         return 1
+    create_tail_audio()
 
     err, rc = "", 1
     try:

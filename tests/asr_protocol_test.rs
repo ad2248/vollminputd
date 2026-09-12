@@ -51,7 +51,7 @@ fn factory_config(endpoint: String) -> Config {
 // 通用断言
 // ---------------------------------------------------------------------------
 
-/// 校验请求携带的音频是标准 WAV，且 PCM 载荷与原始录音完全一致
+/// 校验请求携带的音频是标准 WAV，且原始 PCM 后有 250ms 收尾静音
 fn assert_wav_contains_pcm(wav: &[u8], pcm: &[u8]) {
     assert_eq!(&wav[0..4], b"RIFF");
     assert_eq!(&wav[8..12], b"WAVE");
@@ -62,8 +62,9 @@ fn assert_wav_contains_pcm(wav: &[u8], pcm: &[u8]) {
     assert_eq!(u16::from_le_bytes(wav[34..36].try_into().unwrap()), 16, "位深");
     assert_eq!(&wav[36..40], b"data");
     let data_len = u32::from_le_bytes(wav[40..44].try_into().unwrap()) as usize;
-    assert_eq!(data_len, pcm.len());
+    assert_eq!(data_len, pcm.len() + 8000);
     assert_eq!(&wav[44..44 + pcm.len()], pcm, "WAV 载荷应与原始 PCM 一致");
+    assert!(wav[44 + pcm.len()..].iter().all(|&byte| byte == 0), "原始 PCM 后应补静音");
 }
 
 // ---------------------------------------------------------------------------
