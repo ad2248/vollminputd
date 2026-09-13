@@ -10,6 +10,7 @@ pub const DEFAULT_ASR_MODEL: &str = "qwen-audio-3.0-asr-flash";
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(120);
+const TRAILING_SILENCE_BYTES: usize = 16000 * 2 * 250 / 1000;
 
 /// 原生 DashScope HTTP 多模态生成 ASR 引擎（单次 POST，无 WebSocket、无流式）
 pub struct NativeHttpAsrEngine {
@@ -39,7 +40,10 @@ impl NativeHttpAsrEngine {
 impl AsrEngine for NativeHttpAsrEngine {
     async fn recognize(&self, audio_data: &[u8]) -> Result<String> {
         // 1. PCM(16bit 单声道 16kHz) 转 WAV
-        let wav_data = pcm_to_wav(audio_data, 16000, 1);
+        let mut padded_audio = Vec::with_capacity(audio_data.len() + TRAILING_SILENCE_BYTES);
+        padded_audio.extend_from_slice(audio_data);
+        padded_audio.resize(audio_data.len() + TRAILING_SILENCE_BYTES, 0);
+        let wav_data = pcm_to_wav(&padded_audio, 16000, 1);
 
         // 2. WAV 转 base64 data URL
         let audio_data_url = format!("data:audio/wav;base64,{}", BASE64.encode(&wav_data));
