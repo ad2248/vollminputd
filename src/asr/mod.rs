@@ -1,5 +1,6 @@
 pub mod engine;
 pub mod factory;
+pub mod log;
 pub mod native;
 
 // 为了保持向后兼容，重新导出主要类型

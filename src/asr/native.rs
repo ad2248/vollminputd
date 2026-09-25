@@ -1,9 +1,9 @@
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use std::time::Duration;
-
-use crate::audio::pcm_to_wav;
 use super::engine::AsrEngine;
+use super::log::RequestLogger;
+use crate::audio::pcm_to_wav;
+use std::time::Duration;
 
 pub const DEFAULT_ASR_ENDPOINT: &str = "https://llm-y3exskfcgxgxzn23.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
 pub const DEFAULT_ASR_MODEL: &str = "qwen-audio-3.0-asr-flash";
@@ -18,6 +18,7 @@ pub struct NativeHttpAsrEngine {
     endpoint: String,
     model: String,
     client: reqwest::Client,
+    logger: Option<RequestLogger>,
 }
 
 impl NativeHttpAsrEngine {
@@ -32,7 +33,13 @@ impl NativeHttpAsrEngine {
             endpoint: endpoint.into(),
             model: model.into(),
             client,
+            logger: None,
         }
+    }
+
+    pub fn with_logger(mut self, logger: RequestLogger) -> Self {
+        self.logger = Some(logger);
+        self
     }
 }
 
@@ -44,6 +51,15 @@ impl AsrEngine for NativeHttpAsrEngine {
         padded_audio.extend_from_slice(audio_data);
         padded_audio.resize(audio_data.len() + TRAILING_SILENCE_BYTES, 0);
         let wav_data = pcm_to_wav(&padded_audio, 16000, 1);
+
+        // 保存与请求体完全相同的 WAV；日志失败不能影响语音识别。
+        let entry = self.logger.as_ref().and_then(|logger| match logger.start(&wav_data) {
+            Ok(entry) => Some(entry),
+            Err(error) => {
+                eprintln!("[WARN] 保存 ASR 请求音频失败: {error}");
+                None
+            }
+        });
 
         // 2. WAV 转 base64 data URL
         let audio_data_url = format!("data:audio/wav;base64,{}", BASE64.encode(&wav_data));
@@ -113,6 +129,12 @@ impl AsrEngine for NativeHttpAsrEngine {
 
         if result_text.is_empty() {
             println!("[WARN] 识别结果为空");
+        }
+
+        if let Some(entry) = entry {
+            if let Err(error) = entry.finish(&result_text) {
+                eprintln!("[WARN] 保存 ASR 转录日志失败: {error}");
+            }
         }
 
         Ok(result_text)
