@@ -376,9 +376,9 @@ async fn test_request_log_uses_output_text_fallback_and_cleans_up_api_failures()
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(serve_http(listener, "200 OK", r#"{"output":{"text":"回退转录"}}"#.into()));
-    let engine = engine(format!("http://{addr}/generation"))
+    let fallback_engine = engine(format!("http://{addr}/generation"))
         .with_logger(RequestLogger::new(root.clone(), 10));
-    assert_eq!(bounded(engine.recognize(&test_pcm())).await.unwrap(), "回退转录");
+    assert_eq!(bounded(fallback_engine.recognize(&test_pcm())).await.unwrap(), "回退转录");
     bounded(server).await.unwrap();
     let entry = std::fs::read_dir(&root).unwrap().next().unwrap().unwrap().path();
     assert_eq!(std::fs::read_to_string(entry.join("response.txt")).unwrap(), "回退转录");
