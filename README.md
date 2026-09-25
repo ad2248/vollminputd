@@ -6,6 +6,7 @@
 
 - **原生 HTTP 语音识别**：单一后端/模型 `qwen-audio-3.0-asr-flash`，走原生 HTTP 服务
 - **系统级集成**：通过 FIFO 命名管道接收快捷键触发，可作为守护进程常驻后台
+- **Qt 控制面板**：独立窗口提供 TOGGLE 按钮，通过本机 Unix socket 控制同一守护进程；原有 FIFO 继续可用
 - **实时反馈**：录音过程中显示桌面通知，包括录音时长、设备信息
 - **自动超时保护**：可配置最大录音时长，防止忘记停止录音
 - **Wayland 原生支持**：使用 `wl-copy` 写入剪贴板，适配现代 Linux 桌面环境
@@ -19,6 +20,8 @@
   - `wl-copy`（[wl-clipboard](https://github.com/bugaevc/wl-clipboard) 包提供）
   - 音频输入设备（麦克风）
   - 支持桌面通知的环境（D-Bus）
+  - 构建控制面板需要 Qt 6 Widgets/Network、CMake 和 C++17 编译器（仅运行守护进程不需要 Qt）
+  - 运行控制面板需要设置 `XDG_RUNTIME_DIR`（守护进程也在此目录创建控制 socket）
 
 ## 快速开始
 
@@ -101,6 +104,30 @@ echo "TOGGLE" > /tmp/vollminputd_default.fifo
 ```
 
 识别完成后，文字会自动写入剪贴板，你可以直接粘贴使用。
+
+### Qt 控制面板
+
+面板和守护进程是两个独立程序。安装 Qt 6 Widgets/Network 与 CMake 后构建面板：
+
+```bash
+cmake -S panel -B build/panel
+cmake --build build/panel
+# 在同一个用户会话下启动守护进程后：
+./build/panel/vollminputd-panel --instance default
+```
+
+窗口只有一个 `TOGGLE` 按钮；每次点击都向守护进程发送一次切换命令。如果守护进程未运行、录音失败或识别期间无法切换，面板会显示错误。可用 `cmake --install build/panel --prefix ~/.local` 单独安装面板。现有 FIFO 快捷键不受影响。
+
+### 控制 socket 协议
+
+守护进程在 `$XDG_RUNTIME_DIR/vollminputd_<实例名>.sock` 监听本机 Unix socket（权限 `0600`）。**一次连接发送一行 UTF-8 JSON 请求，接收一行 JSON 响应后关闭**；请求必须以换行符结尾、最多 4096 字节。`id` 为非负整数，响应中原样返回；无效请求以 `id: null` 返回错误。当前命令：
+
+```json
+{"id":1,"command":"toggle"}
+{"id":1,"ok":true,"state":"recording"}
+```
+
+`{"id":2,"command":"get_status"}` 可查询当前状态。`state` 为 `idle`、`recording` 或 `transcribing`；失败响应形如 `{"id":1,"ok":false,"error":"..."}`。这是按需查询协议，不主动推送状态。FIFO 仍只接收 `TOGGLE`，无需迁移现有快捷键配置。
 
 ## 配置说明
 

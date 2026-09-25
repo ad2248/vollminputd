@@ -27,6 +27,7 @@ from pathlib import Path
 
 INSTANCE = os.environ.get("TEST_INSTANCE", "itest")
 FIFO = Path(f"/tmp/vollminputd_{INSTANCE}.fifo")
+CONTROL = Path("/run/user/0") / f"vollminputd_{INSTANCE}.sock"
 AUDIO = Path("/tests/repo-tests/test_audio.wav")
 TAIL_AUDIO = Path("/tmp/tail-audio.wav")
 SCRIPTS = Path("/tests/scripts")
@@ -129,6 +130,23 @@ def fifo_write(line):
         raise StepFailure(f"FIFO 写入失败（读者消失？daemon 挂了？）: {e}")
     finally:
         os.close(fd)
+
+
+def control_request(command):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(T["fifo"])
+        client.connect(str(CONTROL))
+        client.sendall((json.dumps({"id": 1, "command": command}) + "\n").encode())
+        response = bytearray()
+        while not response.endswith(b"\n"):
+            chunk = client.recv(4096)
+            if not chunk:
+                raise StepFailure("控制 socket 在响应前断开")
+            response.extend(chunk)
+        result = json.loads(response)
+        if result.get("id") != 1 or not result.get("ok"):
+            raise StepFailure(f"控制 socket 返回错误: {result}")
+        return result["state"]
 
 
 def dtext():
@@ -268,6 +286,8 @@ def start_daemon(key, endpoint):
     PROCS.append(DAEMON)
     wait_log(r"程序就绪", T["daemon"])
     log(f"daemon 就绪，FIFO: {FIFO}")
+    assert CONTROL.is_socket(), f"控制 socket 不存在: {CONTROL}"
+    assert control_request("get_status") == "idle"
 
 
 def paste():
@@ -306,20 +326,28 @@ def do_round(idx):
         raise StepFailure(f"wl-copy --clear 失败 rc={r.returncode}: {r.stdout}{r.stderr}")
     if paste().strip():
         raise StepFailure("剪贴板未清空")
-    fifo_write("TOGGLE\n")
+    if idx == 1:
+        assert control_request("toggle") == "recording"
+    else:
+        fifo_write("TOGGLE\n")
     wait_log(r"副作用: 启动音频采集", T["record"])
+    assert control_request("get_status") == "recording"
     log("录音就绪，播放测试音频")
     audio = AUDIO if LIVE else TAIL_AUDIO
     r = run(["pw-play", "--target=test-sink", str(audio)], T["play"], "pw-play")
     if r.returncode != 0:
         raise StepFailure(f"pw-play rc={r.returncode}\n{r.stdout}{r.stderr}")
     log("播放完毕，第二次 TOGGLE")
-    fifo_write("TOGGLE\n")
+    if idx == 1:
+        fifo_write("TOGGLE\n")
+    else:
+        assert control_request("toggle") == "transcribing"
     text = wait_log(r"ASR 识别成功: '(.*?)'\n", T["asr"], re.S, FAIL_MARKS).group(1)
     if not text.strip() or (not LIVE and text.strip() != TEXT):
         raise StepFailure(f"识别文本不符合预期: {text!r}")
     log(f"ASR 识别成功: {text!r}")
     wait_log(r"事件处理完成，新状态: Idle", T["idle"])   # 确保 wl-copy 已执行
+    assert control_request("get_status") == "idle"
     wait_clipboard(text.strip())
     log("剪贴板 == 识别文本 ✓")
     if not LIVE:

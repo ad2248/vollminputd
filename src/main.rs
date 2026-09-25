@@ -3,6 +3,7 @@ use vollminputd::asr::create_asr_engine;
 use vollminputd::audio::{list_input_devices, CpalAudioCapture};
 use vollminputd::clipboard::WlCopyClipboard;
 use vollminputd::config::Config;
+use vollminputd::control::{ControlCommand, ControlRequest, ControlSocket, socket_path};
 use vollminputd::notifier::{Notifier, NotifyRustNotifier};
 use vollminputd::state::{AppEvent, AppState};
 use std::env;
@@ -11,7 +12,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{self, Command};
 use std::thread;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug)]
 enum ImeCommand {
@@ -97,8 +98,17 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env()?;
     let notifier = NotifyRustNotifier;
 
+    let control_path = socket_path(&instance)?;
+    let control_socket = ControlSocket::bind(control_path.clone())?;
     setup_fifo(&fifo_path)?;
     println!("[INFO] FIFO 已创建: {}", fifo_path);
+    let (control_tx, mut control_rx) = mpsc::channel::<ControlRequest>(10);
+    tokio::spawn(async move {
+        if let Err(error) = control_socket.serve(control_tx).await {
+            eprintln!("[ERROR] 控制 socket 监听失败: {error}");
+        }
+    });
+    println!("[INFO] 控制 socket 已创建: {}", control_path.display());
 
     let audio = CpalAudioCapture::new(config.audio_device.clone());
     let clipboard = WlCopyClipboard::new();
@@ -131,6 +141,7 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         let mut event: Option<AppEvent> = None;
+        let mut reply: Option<oneshot::Sender<Result<&'static str, String>>> = None;
 
         tokio::select! {
             Some(cmd) = fifo_rx.recv() => {
@@ -145,6 +156,17 @@ async fn main() -> anyhow::Result<()> {
                 println!("[INFO] 收到 ASR 事件: {:?}", asr_event);
                 event = Some(asr_event);
             }
+            Some(request) = control_rx.recv() => {
+                match request.command {
+                    ControlCommand::Toggle => {
+                        event = Some(AppEvent::ToggleRecording);
+                        reply = Some(request.reply);
+                    }
+                    ControlCommand::GetStatus => {
+                        let _ = request.reply.send(Ok(state_name(&app.state)));
+                    }
+                }
+            }
             _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {}
         }
 
@@ -156,11 +178,15 @@ async fn main() -> anyhow::Result<()> {
             }
             if timeout {
                 println!("[INFO] 录音超时，自动停止");
-                event = Some(AppEvent::ToggleRecording);
+                if event.is_none() {
+                    event = Some(AppEvent::ToggleRecording);
+                }
             }
         }
 
         if let Some(incoming) = event {
+            let rejected = matches!(incoming, AppEvent::ToggleRecording)
+                && matches!(app.state, AppState::Transcribing);
             println!("[INFO] 处理事件: {:?}", incoming);
             let effects = app.handle_event(incoming).await;
             println!("[INFO] 事件处理完成，新状态: {:?}", app.state);
@@ -173,7 +199,29 @@ async fn main() -> anyhow::Result<()> {
                     &notifier,
                 );
             }
+            if let Some(reply) = reply {
+                let error = effects.iter().find_map(|effect| match effect {
+                    SideEffect::Notify { title, body, .. } if title == "录音失败" => Some(body.clone()),
+                    _ => None,
+                });
+                let result = if rejected {
+                    Err("识别进行中，暂时无法切换录音".to_string())
+                } else if let Some(error) = error {
+                    Err(error)
+                } else {
+                    Ok(state_name(&app.state))
+                };
+                let _ = reply.send(result);
+            }
         }
+    }
+}
+
+fn state_name(state: &AppState) -> &'static str {
+    match state {
+        AppState::Idle => "idle",
+        AppState::Recording => "recording",
+        AppState::Transcribing => "transcribing",
     }
 }
 

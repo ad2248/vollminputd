@@ -3,7 +3,7 @@
 
 每条用例在独立容器内跑 scripts/02_toggle_happy_path.py：
     pacman -U 安装 /build-out/*.pkg.tar.zst → PipeWire + wireplumber + pw-loopback
-    虚拟麦克风 → sway headless → vollminputd → FIFO TOGGLE ×2 夹一段 pw-play 播放
+    虚拟麦克风 → sway headless → vollminputd → FIFO/socket 各一次 TOGGLE，夹一段 pw-play 播放
     → 断言剪贴板（host 的 conftest 负责镜像/tarball/产物 fixture 与 --live 收集过滤）。
 
 两条用例：
