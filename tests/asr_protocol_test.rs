@@ -5,6 +5,7 @@
 //! 空结果、HTTP 错误/限流/畸形响应/缺失字段等行为。所有协议交互均限时 5s，失败即失败，不挂起。
 
 use std::future::Future;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -12,6 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use vollminputd::asr::engine::AsrEngine;
+use vollminputd::asr::log::RequestLogger;
 use vollminputd::asr::{create_asr_engine, NativeHttpAsrEngine};
 use vollminputd::config::Config;
 
@@ -44,6 +46,7 @@ fn factory_config(endpoint: String) -> Config {
         audio_device: None,
         asr_endpoint: endpoint,
         asr_model: "qwen-audio-3.0-asr-flash".to_string(),
+        max_log_entries: 1000,
     }
 }
 
@@ -315,4 +318,92 @@ async fn test_native_connect_refused_is_error() {
 
     let result = bounded(engine(format!("http://{addr}/generation")).recognize(&test_pcm())).await;
     assert!(result.is_err(), "连接失败应返回错误");
+}
+
+fn test_log_root() -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "vollminputd-log-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ))
+}
+
+#[tokio::test]
+async fn test_request_log_saves_exact_wav_and_raw_text_and_prunes_oldest() {
+    let root = test_log_root();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let pcm = test_pcm();
+    let server = tokio::spawn(serve_http(listener, "200 OK", r#"{"text":"原始文字","output":{"text":"其他文字"}}"#.into()));
+    let engine = engine(format!("http://{addr}/generation"))
+        .with_logger(RequestLogger::new(root.clone(), 1));
+    assert_eq!(bounded(engine.recognize(&pcm)).await.unwrap(), "原始文字");
+    let capture = bounded(server).await.unwrap();
+    assert_native_request(&capture, &pcm);
+
+    let first = std::fs::read_dir(&root).unwrap().next().unwrap().unwrap().path();
+    assert_eq!(first.file_name().unwrap().to_str().unwrap().len(), 30);
+    let wav = std::fs::read(first.join("request.wav")).unwrap();
+    let b64 = capture.body_json["input"]["messages"][0]["content"][0]["input_audio"]["data"]
+        .as_str().unwrap().strip_prefix("data:audio/wav;base64,").unwrap();
+    assert_eq!(wav, BASE64.decode(b64).unwrap());
+    assert_eq!(std::fs::read_to_string(first.join("response.txt")).unwrap(), "原始文字");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o700);
+    assert_eq!(std::fs::metadata(first.join("request.wav")).unwrap().permissions().mode() & 0o777, 0o600);
+
+    let logger = RequestLogger::new(root.clone(), 1);
+    logger.start(b"second").unwrap().finish("").unwrap();
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+    assert!(!first.exists());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn test_failed_or_disabled_log_leaves_no_partial_entries() {
+    let root = test_log_root();
+    let logger = RequestLogger::new(root.clone(), 1);
+    drop(logger.start(b"wav").unwrap());
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+    assert!(RequestLogger::new(root.clone(), 0).start(b"wav").is_err());
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn test_request_log_uses_output_text_fallback_and_cleans_up_api_failures() {
+    let root = test_log_root();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(serve_http(listener, "200 OK", r#"{"output":{"text":"回退转录"}}"#.into()));
+    let fallback_engine = engine(format!("http://{addr}/generation"))
+        .with_logger(RequestLogger::new(root.clone(), 10));
+    assert_eq!(bounded(fallback_engine.recognize(&test_pcm())).await.unwrap(), "回退转录");
+    bounded(server).await.unwrap();
+    let entry = std::fs::read_dir(&root).unwrap().next().unwrap().unwrap().path();
+    assert_eq!(std::fs::read_to_string(entry.join("response.txt")).unwrap(), "回退转录");
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(serve_http(listener, "503 Service Unavailable", "{}".into()));
+    let engine = engine(format!("http://{addr}/generation"))
+        .with_logger(RequestLogger::new(root.clone(), 10));
+    assert!(bounded(engine.recognize(&test_pcm())).await.is_err());
+    bounded(server).await.unwrap();
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn test_log_write_failure_does_not_block_recognition() {
+    let root = test_log_root();
+    std::fs::write(&root, b"not a directory").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(serve_http(listener, "200 OK", r#"{"text":"仍然识别"}"#.into()));
+    let engine = engine(format!("http://{addr}/generation"))
+        .with_logger(RequestLogger::new(root.clone(), 10));
+    assert_eq!(bounded(engine.recognize(&test_pcm())).await.unwrap(), "仍然识别");
+    bounded(server).await.unwrap();
+    std::fs::remove_file(root).unwrap();
 }

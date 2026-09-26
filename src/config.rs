@@ -14,6 +14,8 @@ pub struct Config {
     pub asr_endpoint: String,
     /// ASR 模型名称
     pub asr_model: String,
+    /// 最多保留的完整 ASR 请求日志条目
+    pub max_log_entries: usize,
 }
 
 impl Config {
@@ -54,6 +56,11 @@ impl Config {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| DEFAULT_ASR_MODEL.to_string());
 
+        let max_log_entries = env::var("VOLLMINPUTD_MAX_LOG_ENTRIES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1000);
+
         Ok(Config {
             dashscope_api_key,
             max_recording_seconds,
@@ -62,6 +69,7 @@ impl Config {
             audio_device,
             asr_endpoint,
             asr_model,
+            max_log_entries,
         })
     }
 }

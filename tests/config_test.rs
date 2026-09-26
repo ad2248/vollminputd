@@ -14,6 +14,7 @@ fn clear_env_vars() {
         "VOLLMINPUTD_AUDIO_SAMPLE_RATE",
         "VOLLMINPUTD_AUDIO_CHANNELS",
         "VOLLMINPUTD_AUDIO_DEVICE",
+        "VOLLMINPUTD_MAX_LOG_ENTRIES",
     ] {
         unsafe { env::remove_var(key); }
     }
@@ -30,6 +31,7 @@ fn test_load_full_config() {
     unsafe { env::set_var("VOLLMINPUTD_AUDIO_DEVICE", "  test-device-id  "); }
     unsafe { env::set_var("VOLLMINPUTD_ASR_ENDPOINT", "http://127.0.0.1:18903/generation"); }
     unsafe { env::set_var("VOLLMINPUTD_ASR_MODEL", "custom-asr-model"); }
+    unsafe { env::set_var("VOLLMINPUTD_MAX_LOG_ENTRIES", "42"); }
 
     let config = Config::from_env().unwrap();
     assert_eq!(config.dashscope_api_key, "test-key");
@@ -39,6 +41,7 @@ fn test_load_full_config() {
     assert_eq!(config.audio_device.as_deref(), Some("test-device-id"));
     assert_eq!(config.asr_endpoint, "http://127.0.0.1:18903/generation");
     assert_eq!(config.asr_model, "custom-asr-model");
+    assert_eq!(config.max_log_entries, 42);
 }
 
 #[test]
@@ -55,6 +58,7 @@ fn test_load_minimal_config() {
     assert_eq!(config.audio_device, None);
     assert_eq!(config.asr_endpoint, DEFAULT_ASR_ENDPOINT);
     assert_eq!(config.asr_model, DEFAULT_ASR_MODEL);
+    assert_eq!(config.max_log_entries, 1000);
 }
 
 #[test]

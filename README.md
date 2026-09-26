@@ -142,6 +142,7 @@ vollminputd 通过环境变量进行配置：
 | `VOLLMINPUTD_AUDIO_SAMPLE_RATE` | integer | `16000` | 音频采样率（Hz） |
 | `VOLLMINPUTD_AUDIO_CHANNELS` | integer | `1` | 音频通道数 |
 | `VOLLMINPUTD_AUDIO_DEVICE` | string | 系统默认设备 | 可选，输入设备的完整名称或 `--list-input-devices` 显示的设备 ID |
+| `VOLLMINPUTD_MAX_LOG_ENTRIES` | integer | `1000` | 最多保留的完整请求日志条目；设为 `0` 禁用保存 |
 
 > 准确性说明：当前实际录音固定为 16 kHz、16 bit、单声道（实现内硬编码），`VOLLMINPUTD_AUDIO_SAMPLE_RATE` / `VOLLMINPUTD_AUDIO_CHANNELS` 不会改变采集参数。
 
@@ -160,6 +161,13 @@ export VOLLMINPUTD_AUDIO_DEVICE="<设备 ID 或完整名称>"
 ## ASR 接口
 
 调用 `VOLLMINPUTD_ASR_ENDPOINT` 的原生 HTTP 服务，请求体为 `input.messages` + `parameters`（`formatwav`，采样率 16000），音频以 `audio/wav;base64` 内嵌；从应答的 `text` 或 `output.text` 取识别文本。
+
+### 请求日志
+
+每次成功识别会在 `/var/log/vollminputd/<UTC ISO 8601 时间戳>/` 保存 `request.wav`（实际上传的 WAV，包括收尾静音）和 `response.txt`（API 返回的识别文字，优先顶层 `text`，否则 `output.text`；空文字也保存）。失败的请求不保留半成品。超出 `VOLLMINPUTD_MAX_LOG_ENTRIES` 时删除最旧的完整条目；`0` 禁用日志。日志写入失败会在标准错误输出告警，不影响识别。
+
+普通用户通常无权写入 `/var/log`，启动前需要管理员创建目录并授权给运行守护进程的用户，例如 `sudo install -d -m 0700 -o "$USER" -g "$(id -gn)" /var/log/vollminputd`。音频与文字包含敏感信息：目录要求仅当前用户可访问（0700），文件按 0600 创建；请根据需要设置额外的备份和清理策略。
+现有的标准输出也会打印识别结果，管理守护进程输出的系统日志时同样需要注意访问权限。
 
 ## 架构设计
 
